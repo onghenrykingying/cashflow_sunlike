@@ -1,237 +1,1699 @@
-/**
- * Cashflow Dashboard — Google Apps Script Backend
- *
- * SETUP INSTRUCTIONS:
- * 1. Go to https://script.google.com → New project
- * 2. Delete any existing code, paste this entire file
- * 3. Click Deploy → New deployment
- *    - Type: Web app
- *    - Execute as: Me
- *    - Who has access: Anyone
- * 4. Click Deploy → copy the Web app URL
- * 5. Paste that URL into cashflow-app.html as the SCRIPT_URL constant
- *
- * PERMISSIONS: When prompted, allow access to Google Sheets.
- */
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cashflow Dashboard · PHP</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f0f2f5; color: #1a202c; }
+.app { display: flex; height: 100vh; overflow: hidden; }
 
-// ═══════════════════════════════════════════════════════
-// CONFIGURATION
-// ═══════════════════════════════════════════════════════
+/* ── Sidebar ── */
+.sidebar { width: 245px; background: #0f2040; color: white; display: flex; flex-direction: column; flex-shrink: 0; }
+.sidebar-logo { padding: 22px 20px 18px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.sidebar-logo h1 { font-size: 17px; font-weight: 700; letter-spacing: -.3px; }
+.sidebar-logo span { font-size: 11.5px; color: rgba(255,255,255,.45); margin-top: 2px; display: block; }
+.balance-config { padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,.1); }
+.balance-config label { font-size: 10.5px; color: rgba(255,255,255,.45); text-transform: uppercase; letter-spacing: .6px; display: block; margin-bottom: 6px; }
+.balance-config input { width: 100%; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15); border-radius: 6px; color: white; padding: 8px 10px; font-size: 14px; font-family: inherit; }
+.balance-config input:focus { outline: none; border-color: #38bdf8; }
+nav { padding: 10px 0; flex: 1; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 11px 20px; cursor: pointer; font-size: 13.5px; color: rgba(255,255,255,.6); transition: all .15s; border-left: 3px solid transparent; user-select: none; }
+.nav-item:hover { background: rgba(255,255,255,.05); color: white; }
+.nav-item.active { background: rgba(56,189,248,.12); color: #38bdf8; border-left-color: #38bdf8; }
+.nav-item .ic { width: 20px; text-align: center; font-size: 15px; }
+.nav-badge { margin-left: auto; background: #ef4444; color: white; font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 700; }
+.sidebar-footer { padding: 14px 20px; font-size: 11px; color: rgba(255,255,255,.25); border-top: 1px solid rgba(255,255,255,.1); }
 
-const CR_SHEET_ID  = '1_CDXLbY4nlMGIQZO8Cyf9UP50kWyKnOGrDVXGAq0UTQ';
-const CR_TAB       = 'Collection Record';
+/* ── Main ── */
+.main { flex: 1; overflow-y: auto; }
+.page { display: none; padding: 28px 32px; min-height: 100%; }
+.page.active { display: block; }
+.page-header { margin-bottom: 16px; }
+.page-header h2 { font-size: 21px; font-weight: 700; }
+.page-header p { font-size: 13.5px; color: #64748b; margin-top: 3px; }
 
-const BANK_SHEET_ID = '1QJ_ywFZoOvgIXD-EfEois38oIeEbYmyA5q_hUtvvJb0';
-const BANK_TAB      = 'China Bank';
+/* ── Date Range Picker ── */
+.drp-wrap { position: relative; display: inline-block; margin-bottom: 16px; }
+.drp-trigger {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; background: white;
+  border: 1px solid #e2e8f0; border-radius: 8px;
+  cursor: pointer; font-family: inherit; font-size: 13px; color: #374151;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05); transition: border-color .15s;
+}
+.drp-trigger:hover { border-color: #0ea5e9; }
+.drp-trigger svg { flex-shrink: 0; color: #64748b; }
+.drp-label { font-weight: 600; }
+.drp-range { color: #64748b; font-size: 12px; }
+.drp-caret { color: #94a3b8; margin-left: 2px; }
+.drp-panel {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  background: white; border: 1px solid #e2e8f0; border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.13); z-index: 300;
+  display: none; flex-direction: row; overflow: hidden;
+}
+.drp-panel.open { display: flex; }
+.drp-list { padding: 8px; min-width: 160px; }
+.drp-item {
+  padding: 8px 14px; border-radius: 6px; font-size: 13px;
+  cursor: pointer; color: #374151; white-space: nowrap; transition: background .1s;
+}
+.drp-item:hover { background: #f1f5f9; }
+.drp-item.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+.drp-custom-pane {
+  display: none; flex-direction: column; gap: 11px;
+  padding: 16px; border-left: 1px solid #f1f5f9; min-width: 210px;
+}
+.drp-custom-pane.visible { display: flex; }
+.drp-field label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; color: #94a3b8; font-weight: 600; display: block; margin-bottom: 5px; }
+.drp-date-input { width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: inherit; color: #374151; }
+.drp-date-input:focus { outline: none; border-color: #0ea5e9; }
+.drp-apply { padding: 8px; background: #0ea5e9; color: white; border: none; border-radius: 6px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; margin-top: 4px; }
+.drp-apply:hover { background: #0284c7; }
+.drp-divider { height: 1px; background: #f1f5f9; margin: 4px 0; }
 
-// ⬇⬇⬇  CHANGE THIS to your own password. Only you can see this file.
-// The dashboard returns NO data unless this exact password is supplied.
-const ACCESS_PASSWORD = '1Gundampiece';
+/* ── Notice ── */
+.notice { background: #fefce8; border: 1px solid #fde68a; border-radius: 8px; padding: 11px 16px; font-size: 13px; color: #92400e; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
 
-// ═══════════════════════════════════════════════════════
-// WEB APP ENTRY POINT
-// ═══════════════════════════════════════════════════════
+/* ── Connection banner (shown when live data not loaded) ── */
+.conn-banner { background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; padding: 13px 16px; font-size: 13px; color: #991b1b; margin-bottom: 20px; display: none; align-items: flex-start; gap: 10px; line-height: 1.5; }
+.conn-banner span { font-size: 16px; flex-shrink: 0; }
+.conn-banner strong { color: #7f1d1d; }
 
-function doGet(e) {
-  const cb = e && e.parameter && e.parameter.callback;
-  const reply = obj => {
-    const json = JSON.stringify(obj);
-    return cb
-      ? ContentService.createTextOutput(cb + '(' + json + ')').setMimeType(ContentService.MimeType.JAVASCRIPT)
-      : ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
-  };
+/* ── KPI cards ── */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.kpi { background: white; border-radius: 10px; padding: 17px 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.kpi-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; color: #94a3b8; font-weight: 600; }
+.kpi-value { font-size: 23px; font-weight: 700; margin: 5px 0 2px; }
+.kpi-sub { font-size: 12px; color: #64748b; }
+.kpi.blue .kpi-value  { color: #0ea5e9; }
+.kpi.green .kpi-value { color: #10b981; }
+.kpi.red .kpi-value   { color: #ef4444; }
+.kpi.amber .kpi-value { color: #f59e0b; }
 
-  try {
-    // Password gate — validated server-side, so the raw URL leaks nothing.
-    const pw = e && e.parameter && e.parameter.pw;
-    if (pw !== ACCESS_PASSWORD) {
-      return reply({ error: 'unauthorized' });
+/* ── Panel ── */
+.panel { background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 20px; overflow: hidden; }
+.panel-header { padding: 15px 20px; border-bottom: 1px solid #f1f5f9; font-size: 13.5px; font-weight: 600; color: #374151; }
+
+/* ── Tables ── */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th { padding: 10px 16px; text-align: left; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; color: #94a3b8; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+td { padding: 12px 16px; border-bottom: 1px solid #f1f5f9; color: #374151; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f8fafc; }
+tfoot td { padding: 12px 16px; background: #f8fafc; font-weight: 700; border-top: 2px solid #e2e8f0; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.empty-row td { text-align: center; color: #94a3b8; padding: 32px 16px !important; font-size: 13px; }
+
+/* ── Badges ── */
+.badge { display: inline-flex; align-items: center; gap: 3px; padding: 3px 9px; border-radius: 20px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.b-covered   { background: #d1fae5; color: #065f46; }
+.b-tight     { background: #fef3c7; color: #92400e; }
+.b-short     { background: #fee2e2; color: #991b1b; }
+.b-none      { background: #f1f5f9; color: #64748b; }
+.b-collected { background: #d1fae5; color: #065f46; }
+.b-notfound  { background: #fee2e2; color: #991b1b; }
+.b-unmatched { background: #fff7ed; color: #c2410c; }
+.b-pm        { background: #ede9fe; color: #4c1d95; }
+.b-dep       { background: #dbeafe; color: #1e40af; }
+
+/* ── Deposit input ── */
+.dep-input { width: 130px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 8px; font-size: 13px; font-family: inherit; text-align: right; transition: border-color .15s; }
+.dep-input:focus { outline: none; border-color: #0ea5e9; }
+
+/* ── Chart ── */
+.chart-wrap { padding: 20px; height: 290px; }
+
+/* ── Logic callout ── */
+.logic-box { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 13px 18px; margin-bottom: 20px; font-size: 13px; color: #0c4a6e; line-height: 1.7; }
+.logic-box strong { color: #075985; }
+
+/* ── Data status bar ── */
+.data-status { display: flex; align-items: center; gap: 9px; padding: 13px 20px; border-top: 1px solid rgba(255,255,255,.08); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.live         { background: #10b981; }
+.status-dot.fake         { background: #64748b; }
+.status-dot.disconnected { background: #ef4444; }
+.status-dot.loading      { background: #f59e0b; animation: blink 1s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+.status-text { flex: 1; }
+.status-label { font-size: 12px; color: rgba(255,255,255,.65); font-weight: 500; }
+.status-time  { font-size: 10.5px; color: rgba(255,255,255,.3); margin-top: 1px; }
+.refresh-btn { background: none; border: 1px solid rgba(255,255,255,.18); color: rgba(255,255,255,.45); border-radius: 5px; padding: 4px 8px; cursor: pointer; font-size: 13px; line-height: 1; transition: all .15s; }
+.refresh-btn:hover { background: rgba(255,255,255,.08); color: white; }
+
+/* ── Login overlay ── */
+.login-overlay { position: fixed; inset: 0; z-index: 1000; background: #0f2040; display: flex; align-items: center; justify-content: center; }
+.login-box { background: white; border-radius: 14px; padding: 38px 40px; width: 340px; box-shadow: 0 12px 40px rgba(0,0,0,.3); text-align: center; }
+.login-box h1 { font-size: 24px; font-weight: 700; color: #0f2040; letter-spacing: -.4px; }
+.login-box .login-sub { font-size: 13px; color: #64748b; margin: 6px 0 22px; }
+.login-box input { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 11px 13px; font-size: 14px; font-family: inherit; margin-bottom: 12px; }
+.login-box input:focus { outline: none; border-color: #0ea5e9; }
+.login-box button { width: 100%; background: #0ea5e9; color: white; border: none; border-radius: 8px; padding: 11px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; transition: background .15s; }
+.login-box button:hover { background: #0284c7; }
+.login-box button:disabled { background: #94a3b8; cursor: default; }
+.login-err { font-size: 12.5px; color: #ef4444; margin-top: 12px; min-height: 16px; }
+
+/* ── Language toggle ── */
+.lang-toggle { display: inline-flex; border-radius: 6px; overflow: hidden; border: 1px solid #e2e8f0; }
+.lang-toggle button { border: none; background: white; color: #64748b; font-family: inherit; font-size: 12px; font-weight: 600; padding: 5px 12px; cursor: pointer; transition: all .15s; }
+.lang-toggle button.active { background: #0ea5e9; color: white; }
+.login-lang { margin-top: 18px; }
+.sidebar-lang { margin: 14px 20px; border-color: rgba(255,255,255,.18); }
+.sidebar-lang button { background: rgba(255,255,255,.06); color: rgba(255,255,255,.55); }
+.sidebar-lang button.active { background: #38bdf8; color: #0f2040; }
+
+/* ── Outstanding receivables bar ── */
+.out-bar { display:flex; align-items:center; gap:10px; padding:12px 18px; background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; margin-bottom:16px; flex-wrap:wrap; font-size:13px; }
+.out-title { font-weight:700; color:#c2410c; white-space:nowrap; }
+.out-field { display:flex; align-items:center; gap:6px; }
+.out-date-in { border:1px solid #fed7aa; border-radius:5px; padding:4px 8px; font-size:12.5px; font-family:inherit; background:white; color:#374151; }
+.out-date-in:focus { outline:none; border-color:#f97316; }
+.out-total { font-size:15px; font-weight:700; color:#0ea5e9; white-space:nowrap; }
+.out-cnt { font-size:11.5px; color:#64748b; white-space:nowrap; }
+.out-toggle { margin-left:auto; display:flex; align-items:center; gap:5px; font-size:12.5px; cursor:pointer; color:#374151; white-space:nowrap; }
+.out-toggle input { cursor:pointer; }
+.out-bar .drp-wrap { margin-bottom:0; }
+.out-bar .drp-trigger { padding:5px 10px; font-size:12.5px; }
+
+/* ── Bulk deposit bar ── */
+.bulk-bar { display: flex; align-items: center; gap: 10px; padding: 13px 20px; border-bottom: 1px solid #f1f5f9; background: #f8fafc; flex-wrap: wrap; }
+.bulk-bar label { font-size: 13px; color: #64748b; white-space: nowrap; }
+.bulk-btn { padding: 6px 14px; border: none; border-radius: 6px; background: #0ea5e9; color: white; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.bulk-btn:hover { background: #0284c7; }
+.bulk-btn.ghost { background: #f1f5f9; color: #64748b; }
+.bulk-btn.ghost:hover { background: #e2e8f0; }
+
+/* ── Download button ── */
+.dl-btn { padding: 5px 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: white; color: #374151; font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; }
+.dl-btn:hover { border-color: #0ea5e9; color: #0ea5e9; }
+
+/* ── Misc ── */
+.neg  { color: #ef4444 !important; font-weight: 600; }
+.muted { color: #94a3b8; }
+.days-chip { display: inline-block; font-size: 11px; background: #f1f5f9; color: #64748b; border-radius: 4px; padding: 1px 6px; margin-left: 5px; }
+</style>
+</head>
+<body>
+
+<!-- ════════════ LOGIN OVERLAY ════════════ -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <h1>Cashflow</h1>
+    <div class="login-sub" data-i18n="login.sub">Enter password to access the dashboard</div>
+    <input type="password" id="loginPw" placeholder="Password" data-i18n-ph="login.pw" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')submitLogin()">
+    <button id="loginBtn" onclick="submitLogin()" data-i18n="login.unlock">Unlock</button>
+    <div class="login-err" id="loginErr"></div>
+    <div class="lang-toggle login-lang">
+      <button onclick="setLang('en')" data-lang-btn="en">EN</button>
+      <button onclick="setLang('zh')" data-lang-btn="zh">中文</button>
+    </div>
+  </div>
+</div>
+
+<div class="app">
+
+<!-- ════════════ SIDEBAR ════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h1>Cashflow</h1>
+    <span data-i18n="sidebar.subtitle">PHP Dashboard &nbsp;·&nbsp; Live Sheets</span>
+  </div>
+  <div class="lang-toggle sidebar-lang">
+    <button onclick="setLang('en')" data-lang-btn="en">EN</button>
+    <button onclick="setLang('zh')" data-lang-btn="zh">中文</button>
+  </div>
+  <div class="balance-config">
+    <label data-i18n="sidebar.startBal">Starting Balance (₱)</label>
+    <input type="text" id="startInput" value="" placeholder="Enter current balance" data-i18n-ph="sidebar.startBalPh" onchange="onBalanceChange(this)">
+  </div>
+  <nav>
+    <div class="nav-item active" onclick="nav('p1',0)"><span class="ic">📊</span> <span data-i18n="nav.p1">Balance vs Cheques</span></div>
+    <div class="nav-item" onclick="nav('p2',1)"><span class="ic">📈</span> <span data-i18n="nav.p2">Cheque Forecast</span></div>
+    <div class="nav-item" onclick="nav('p3',2)">
+      <span class="ic">✅</span> <span data-i18n="nav.p3">Collection Match</span>
+      <span class="nav-badge" id="badgeNotFound">0</span>
+    </div>
+    <div class="nav-item" onclick="nav('p4',3)">
+      <span class="ic">⚠️</span> <span data-i18n="nav.p4">Unmatched Bank</span>
+      <span class="nav-badge" id="badgeUnmatched">0</span>
+    </div>
+    <div class="nav-item" onclick="nav('p5',4)"><span class="ic">💳</span> <span data-i18n="nav.p5">PayMaya Match</span></div>
+  </nav>
+  <div class="data-status">
+    <div class="status-dot disconnected" id="statusDot"></div>
+    <div class="status-text">
+      <div class="status-label" id="statusLabel">Connecting…</div>
+      <div class="status-time"  id="statusTime">Reading Google Sheets</div>
+    </div>
+    <button class="refresh-btn" onclick="refreshData()" data-i18n-title="sidebar.refresh" title="Refresh live data">↻</button>
+  </div>
+</aside>
+
+<!-- ════════════ MAIN ════════════ -->
+<main class="main">
+
+  <!-- PAGE 1 · Balance vs Cheques -->
+  <section class="page active" id="p1">
+    <div class="page-header">
+      <h2 data-i18n="p1.title">Balance vs Cheques</h2>
+      <p data-i18n="p1.desc">Carries the starting balance forward day-by-day — flags each day Covered / Tight / Shortfall.</p>
+    </div>
+    <div id="drp-p1"></div>
+    <div id="out-p1"></div>
+    <div class="conn-banner"></div>
+    <div class="kpi-grid" id="kpi1"></div>
+    <div class="panel">
+      <div class="panel-header" id="ph1">Cheque Coverage</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th data-i18n="col.date">Date</th><th data-i18n="col.day">Day</th>
+            <th class="num" data-i18n="col.chqClearing">Cheques Clearing</th>
+            <th class="num" data-i18n="col.credits">Credits Received</th>
+            <th class="num" data-i18n="col.balBefore">Balance Before</th>
+            <th class="num" data-i18n="col.balAfter">Balance After</th>
+            <th data-i18n="col.status">Status</th>
+          </tr></thead>
+          <tbody id="tb1"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAGE 2 · Cheque Forecast -->
+  <section class="page" id="p2">
+    <div class="page-header">
+      <h2 data-i18n="p2.title">Cheque Forecast</h2>
+      <p data-i18n="p2.desc">Running projection. Edit Expected Deposit per day — KPIs recompute live.</p>
+    </div>
+    <div id="drp-p2"></div>
+    <div id="out-p2"></div>
+    <div class="conn-banner"></div>
+    <div class="kpi-grid" id="kpi2"></div>
+    <div class="panel">
+      <div class="panel-header" data-i18n="p2.dayByDay">Day-by-Day Forecast</div>
+      <div class="bulk-bar">
+        <label data-i18n="p2.bulkLabel">Apply same deposit to all visible days:</label>
+        <input type="text" id="bulkInput" class="dep-input" placeholder="e.g. 1,000,000" style="width:150px">
+        <button class="bulk-btn" onclick="applyBulkDeposit()" data-i18n="p2.applyAll">Apply to All</button>
+        <button class="bulk-btn ghost" onclick="clearDeposits()" data-i18n="p2.clearAll">Clear All</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th data-i18n="col.date">Date</th><th data-i18n="col.day">Day</th>
+            <th class="num" data-i18n="col.chqClearing">Cheques Clearing</th>
+            <th class="num" data-i18n="col.expDeposit">Expected Deposit</th>
+            <th class="num" data-i18n="col.outstandingMinus">Outstanding (−)</th>
+            <th class="num" data-i18n="col.balAfter">Balance After</th>
+            <th data-i18n="col.status">Status</th>
+          </tr></thead>
+          <tbody id="tb2"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAGE 3 · Collection Match -->
+  <section class="page" id="p3">
+    <div class="page-header">
+      <h2 data-i18n="p3.title">Collection Match</h2>
+      <p data-i18n="p3.desc">Each CR entry is matched to the nearest bank INCLEARING on or after its expected date.</p>
+    </div>
+    <div id="drp-p3"></div>
+    <div class="conn-banner"></div>
+    <div class="logic-box" data-i18n-html="p3.logic">
+      <strong>Matching rules:</strong> For each expected cheque, search bank INCLEARINGs for an <strong>exact amount on or after the expected clearing date</strong>. Take the nearest (earliest). Once matched, both entries are consumed and cannot match again.
+    </div>
+    <div class="kpi-grid" id="kpi3"></div>
+    <div class="panel">
+      <div class="panel-header"><span data-i18n="p3.notFoundTitle">🔴 Not Found — Recorded but Not Cleared</span> <button class="dl-btn" onclick="downloadNotFound()">↓ CSV</button></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th data-i18n="col.expDate">Expected Date</th>
+            <th class="num" data-i18n="col.amount">Amount</th>
+            <th class="num" data-i18n="col.daysOutstanding">Days Outstanding</th>
+          </tr></thead>
+          <tbody id="tb3nf"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header" data-i18n="p3.matchResults">Match Results</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th data-i18n="col.expDate">Expected Date</th>
+            <th class="num" data-i18n="col.amount">Amount</th>
+            <th data-i18n="col.status">Status</th>
+            <th data-i18n="col.clearedOn">Cleared On</th>
+            <th class="num" data-i18n="col.daysTaken">Days Taken</th>
+            <th data-i18n="col.chequeNo">Cheque No</th>
+          </tr></thead>
+          <tbody id="tb3"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAGE 4 · Unmatched Bank -->
+  <section class="page" id="p4">
+    <div class="page-header">
+      <h2 data-i18n="p4.title">Unmatched Bank Transactions</h2>
+      <p data-i18n="p4.desc">Bank INCLEARING entries that have no matching amount in the Collection Record.</p>
+    </div>
+    <div id="drp-p4"></div>
+    <div class="conn-banner"></div>
+    <div class="logic-box" data-i18n-html="p4.logic">
+      <strong>What this means:</strong> These cheques cleared from the bank but were <strong>not recorded</strong> in the Collection Record. Each needs investigation — recording gap, error, or unexpected withdrawal.
+    </div>
+    <div class="kpi-grid" id="kpi4"></div>
+    <div class="panel">
+      <div class="panel-header"><span data-i18n="p4.unmatchedTitle">Unmatched INCLEARING Entries</span> <button class="dl-btn" onclick="downloadUnmatched()">↓ CSV</button></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th data-i18n="col.bankDate">Bank Date</th><th data-i18n="col.description">Description</th>
+            <th class="num" data-i18n="col.amountCleared">Amount Cleared</th><th data-i18n="col.flag">Flag</th>
+          </tr></thead>
+          <tbody id="tb4"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header"><span data-i18n="p4.fullStatement">Full Bank Statement</span> <button class="dl-btn" onclick="downloadBankStatement()">↓ CSV</button></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th data-i18n="col.date">Date</th><th data-i18n="col.description">Description</th><th data-i18n="col.type">Type</th>
+            <th class="num" data-i18n="col.credit">Credit</th><th class="num" data-i18n="col.debit">Debit</th>
+          </tr></thead>
+          <tbody id="tb4b"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAGE 5 · PayMaya Match -->
+  <section class="page" id="p5">
+    <div class="page-header">
+      <h2 data-i18n="p5.title">PayMaya Match</h2>
+      <p data-i18n="p5.desc">Net-of-fee per card type, matched to bank CRS RDIST settlement credits.</p>
+    </div>
+    <div id="drp-p5"></div>
+    <div class="conn-banner"></div>
+    <div class="kpi-grid" id="kpi5"></div>
+    <div class="panel">
+      <div class="panel-header" data-i18n="p5.byCardType">Settlement by Card Type</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th data-i18n="col.cardType">Card Type</th>
+            <th class="num" data-i18n="col.transactions">Transactions</th>
+            <th class="num" data-i18n="col.gross">Gross Amount</th>
+            <th class="num" data-i18n="col.feeRate">Fee Rate</th>
+            <th class="num" data-i18n="col.fee">Fee</th>
+            <th class="num" data-i18n="col.netExpected">Net Expected</th>
+          </tr></thead>
+          <tbody id="tb5"></tbody>
+          <tfoot id="tf5"></tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header" data-i18n="p5.batchVsBank">Settlement Batch vs Bank Credits</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th data-i18n="col.settlementDate">Settlement Date</th>
+            <th class="num" data-i18n="col.netExpected">Net Expected</th>
+            <th class="num" data-i18n="col.bankReceived">Bank Received</th>
+            <th class="num" data-i18n="col.variance">Variance</th>
+            <th data-i18n="col.status">Status</th>
+          </tr></thead>
+          <tbody id="tb5b"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+// INTERNATIONALISATION (English / 中文)
+// Names like PayMaya, China Bank, GCash, INCLEARING and all
+// numbers/dates/cheque numbers are intentionally NOT translated.
+// ══════════════════════════════════════════════════════════
+
+let lang = localStorage.getItem('cashflow_lang') || 'en';
+
+const I18N = {
+  // Login + sidebar
+  'login.sub':        { en: 'Enter password to access the dashboard', zh: '輸入密碼以開啟儀表板' },
+  'login.pw':         { en: 'Password', zh: '密碼' },
+  'login.unlock':     { en: 'Unlock', zh: '解鎖' },
+  'sidebar.subtitle': { en: 'PHP Dashboard&nbsp;·&nbsp;Live Sheets', zh: 'PHP 儀表板&nbsp;·&nbsp;即時資料' },
+  'sidebar.startBal': { en: 'Starting Balance (₱)', zh: '起始餘額（₱）' },
+  'sidebar.startBalPh': { en: 'Enter current balance', zh: '輸入目前餘額' },
+  'sidebar.refresh':  { en: 'Refresh live data', zh: '重新整理即時資料' },
+
+  // Nav
+  'nav.p1': { en: 'Balance vs Cheques', zh: '餘額與支票' },
+  'nav.p2': { en: 'Cheque Forecast', zh: '支票預測' },
+  'nav.p3': { en: 'Collection Match', zh: '收款對賬' },
+  'nav.p4': { en: 'Unmatched Bank', zh: '未配對銀行' },
+  'nav.p5': { en: 'PayMaya Match', zh: 'PayMaya 對賬' },
+
+  // Page titles + descriptions
+  'p1.title': { en: 'Balance vs Cheques', zh: '餘額與支票' },
+  'p1.desc':  { en: 'Carries the starting balance forward day-by-day — flags each day Covered / Tight / Shortfall.', zh: '逐日結轉起始餘額，並標示每日狀態：足夠 / 緊張 / 不足。' },
+  'p2.title': { en: 'Cheque Forecast', zh: '支票預測' },
+  'p2.desc':  { en: 'Running projection. Edit Expected Deposit per day — KPIs recompute live.', zh: '滾動推算。可逐日編輯預計存款，指標即時重新計算。' },
+  'p3.title': { en: 'Collection Match', zh: '收款對賬' },
+  'p3.desc':  { en: 'Each Collection Record entry is matched to the nearest bank INCLEARING on or after its expected date.', zh: '每筆收款記錄會配對到預計日期當天或之後最接近的銀行 INCLEARING。' },
+  'p4.title': { en: 'Unmatched Bank Transactions', zh: '未配對銀行交易' },
+  'p4.desc':  { en: 'Bank INCLEARING entries that have no matching amount in the Collection Record.', zh: '在收款記錄中找不到對應金額的銀行 INCLEARING 交易。' },
+  'p5.title': { en: 'PayMaya Match', zh: 'PayMaya 對賬' },
+  'p5.desc':  { en: 'Net-of-fee per card type, matched to bank CRS RDIST settlement credits.', zh: '按卡別計算扣費後淨額，並對賬銀行 CRS RDIST 結算入賬。' },
+
+  // Logic boxes (HTML)
+  'p3.logic': {
+    en: '<strong>Matching rules:</strong> For each expected cheque, search bank INCLEARINGs for an <strong>exact amount on or after the expected clearing date</strong>. Take the nearest (earliest). Once matched, both entries are consumed and cannot match again.',
+    zh: '<strong>配對規則：</strong>就每張預計支票，於銀行 INCLEARING 中尋找<strong>預計兌現日期當天或之後金額完全相同</strong>的交易，取最接近（最早）的一筆。一旦配對成功，雙方記錄即被佔用，不會再次配對。'
+  },
+  'p4.logic': {
+    en: '<strong>What this means:</strong> These cheques cleared from the bank but were <strong>not recorded</strong> in the Collection Record. Each needs investigation — recording gap, error, or unexpected withdrawal.',
+    zh: '<strong>代表意思：</strong>這些支票已從銀行兌現，但在收款記錄中<strong>沒有記錄</strong>。每筆都需要查核——可能是漏記、錯誤或非預期的支出。'
+  },
+
+  // Panel headers
+  'p2.dayByDay':      { en: 'Day-by-Day Forecast', zh: '逐日預測' },
+  'p2.bulkLabel':     { en: 'Apply same deposit to all visible days:', zh: '將相同存款套用到所有顯示日子：' },
+  'p2.applyAll':      { en: 'Apply to All', zh: '套用到全部' },
+  'p2.clearAll':      { en: 'Clear All', zh: '全部清除' },
+  'p3.notFoundTitle': { en: '🔴 Not Found — Recorded but Not Cleared', zh: '🔴 找不到——已記錄但未兌現' },
+  'p3.matchResults':  { en: 'Match Results', zh: '配對結果' },
+  'p4.unmatchedTitle':{ en: 'Unmatched INCLEARING Entries', zh: '未配對的 INCLEARING 交易' },
+  'p4.fullStatement': { en: 'Full Bank Statement', zh: '完整銀行月結單' },
+  'p5.byCardType':    { en: 'Settlement by Card Type', zh: '按卡別結算' },
+  'p5.batchVsBank':   { en: 'Settlement Batch vs Bank Credits', zh: '結算批次與銀行入賬對比' },
+
+  // Table columns
+  'col.date':            { en: 'Date', zh: '日期' },
+  'col.day':             { en: 'Day', zh: '星期' },
+  'col.chqClearing':     { en: 'Cheques Clearing', zh: '支票兌現' },
+  'col.credits':         { en: 'Credits Received', zh: '收到入賬' },
+  'col.balBefore':       { en: 'Balance Before', zh: '之前餘額' },
+  'col.balAfter':        { en: 'Balance After', zh: '之後餘額' },
+  'col.status':          { en: 'Status', zh: '狀態' },
+  'col.expDeposit':      { en: 'Expected Deposit', zh: '預計存款' },
+  'col.outstandingMinus':{ en: 'Outstanding (−)', zh: '未兌現（−）' },
+  'col.expDate':         { en: 'Expected Date', zh: '預計日期' },
+  'col.amount':          { en: 'Amount', zh: '金額' },
+  'col.daysOutstanding': { en: 'Days Outstanding', zh: '未兌現日數' },
+  'col.clearedOn':       { en: 'Cleared On', zh: '兌現日期' },
+  'col.daysTaken':       { en: 'Days Taken', zh: '所需日數' },
+  'col.chequeNo':        { en: 'Cheque No', zh: '支票號碼' },
+  'col.bankDate':        { en: 'Bank Date', zh: '銀行日期' },
+  'col.description':     { en: 'Description', zh: '摘要' },
+  'col.amountCleared':   { en: 'Amount Cleared', zh: '兌現金額' },
+  'col.flag':            { en: 'Flag', zh: '標示' },
+  'col.type':            { en: 'Type', zh: '類型' },
+  'col.credit':          { en: 'Credit', zh: '入賬' },
+  'col.debit':           { en: 'Debit', zh: '出賬' },
+  'col.cardType':        { en: 'Card Type', zh: '卡別' },
+  'col.transactions':    { en: 'Transactions', zh: '交易數' },
+  'col.gross':           { en: 'Gross Amount', zh: '總金額' },
+  'col.feeRate':         { en: 'Fee Rate', zh: '費率' },
+  'col.fee':             { en: 'Fee', zh: '手續費' },
+  'col.netExpected':     { en: 'Net Expected', zh: '預計淨額' },
+  'col.settlementDate':  { en: 'Settlement Date', zh: '結算日期' },
+  'col.bankReceived':    { en: 'Bank Received', zh: '銀行收到' },
+  'col.variance':        { en: 'Variance', zh: '差額' },
+
+  // Date picker presets
+  'preset.today':        { en: 'Today', zh: '今天' },
+  'preset.yesterday':    { en: 'Yesterday', zh: '昨天' },
+  'preset.last_7_days':  { en: 'Last 7 Days', zh: '最近 7 天' },
+  'preset.last_30_days': { en: 'Last 30 Days', zh: '最近 30 天' },
+  'preset.last_2_weeks': { en: 'Last 2 Weeks', zh: '最近兩週' },
+  'preset.this_week':    { en: 'This Week', zh: '本週' },
+  'preset.last_week':    { en: 'Last Week', zh: '上週' },
+  'preset.this_month':   { en: 'This Month', zh: '本月' },
+  'preset.this_month_td':{ en: 'This Month (to date)', zh: '本月（至今）' },
+  'preset.last_month':   { en: 'Last Month', zh: '上月' },
+  'preset.this_quarter': { en: 'This Quarter', zh: '本季' },
+  'preset.last_quarter': { en: 'Last Quarter', zh: '上季' },
+  'preset.this_year':    { en: 'This Year', zh: '今年' },
+  'preset.last_year':    { en: 'Last Year', zh: '去年' },
+  'preset.custom':       { en: 'Custom Dates', zh: '自訂日期' },
+  'drp.from':            { en: 'From', zh: '由' },
+  'drp.to':              { en: 'To', zh: '至' },
+  'drp.apply':           { en: 'Apply', zh: '套用' },
+
+  // Outstanding bar
+  'out.title':   { en: '📋 Outstanding Cheques', zh: '📋 未兌現支票' },
+  'out.deduct':  { en: 'Deduct from balance', zh: '從餘額扣除' },
+  'out.uncleared': { en: 'uncleared', zh: '張未兌現' },
+  'out.deducted':  { en: 'deducted from balance', zh: '已從餘額扣除' },
+  'out.notDeducted': { en: 'not deducted', zh: '未扣除' },
+
+  // KPIs
+  'kpi.effStartBal':   { en: 'Effective Starting Balance', zh: '有效起始餘額' },
+  'kpi.effAvailBal':   { en: 'Effective Available Balance', zh: '有效可用餘額' },
+  'kpi.bankPlusOut':   { en: 'Bank {bank} − outstanding {out}', zh: '銀行 {bank} − 未兌現 {out}' },
+  'kpi.totalCredits':  { en: 'Total Credits (period)', zh: '總入賬（期間）' },
+  'kpi.creditsSub':    { en: 'Deposits + PayMaya received', zh: '存款 + 收到的 PayMaya' },
+  'kpi.totalCheques':  { en: 'Total Cheques (period)', zh: '總支票（期間）' },
+  'kpi.totalChequesRange': { en: 'Total Cheques', zh: '總支票' },
+  'kpi.clearedFromAcct': { en: 'Cleared from account', zh: '從帳戶兌現' },
+  'kpi.shortfallDays': { en: 'Shortfall Days', zh: '不足日數' },
+  'kpi.coveredDays':   { en: 'Covered Days', zh: '足夠日數' },
+  'kpi.balNeg':        { en: 'Balance goes negative', zh: '餘額轉為負數' },
+  'kpi.balOver500':    { en: 'Balance &gt; ₱500K end of day', zh: '日終餘額 &gt; ₱500K' },
+  'kpi.inRange':       { en: 'In selected range', zh: '在所選範圍內' },
+  'kpi.lowestBal':     { en: 'Lowest Projected Balance', zh: '預測最低餘額' },
+  'kpi.noData':        { en: 'No data', zh: '無資料' },
+  'kpi.allCovered':    { en: 'All days covered', zh: '所有日子足夠' },
+  'kpi.projNeg':       { en: 'Balance projected negative', zh: '預測餘額為負' },
+  'kpi.outDeducted':   { en: 'Outstanding Deducted', zh: '已扣未兌現' },
+  'kpi.pendingDay1':   { en: 'Pending cheques applied Day 1', zh: '待兌支票於第 1 天扣除' },
+  'kpi.crEntries':     { en: 'CR Entries', zh: '收款筆數' },
+  'kpi.expected':      { en: '{amt} expected', zh: '預計 {amt}' },
+  'kpi.collected':     { en: 'Collected', zh: '已兌現' },
+  'kpi.matchedInBank': { en: '{amt} matched in bank', zh: '銀行已配對 {amt}' },
+  'kpi.notFound':      { en: 'Not Found', zh: '找不到' },
+  'kpi.noMatchBank':   { en: 'No matching bank entry', zh: '無對應銀行交易' },
+  'kpi.allAccounted':  { en: 'All accounted for', zh: '全部已對賬' },
+  'kpi.collectionRate':{ en: 'Collection Rate', zh: '收款率' },
+  'kpi.matchedToBank': { en: 'Entries matched to bank', zh: '已與銀行配對的筆數' },
+  'kpi.unmatchedEntries':{ en: 'Unmatched Entries', zh: '未配對筆數' },
+  'kpi.inclNoCR':      { en: 'INCLEARINGs with no CR record', zh: '無收款記錄的 INCLEARING' },
+  'kpi.totalUnmatched':{ en: 'Total Unmatched', zh: '未配對總額' },
+  'kpi.clearedNoRecord':{ en: 'Cleared without a record', zh: '無記錄下兌現' },
+  'kpi.stmtLines':     { en: 'Statement Lines', zh: '月結單筆數' },
+  'kpi.allTypesRange': { en: 'All types in range', zh: '範圍內所有類型' },
+  'kpi.matchedIncl':   { en: 'Matched INCLEARINGs', zh: '已配對 INCLEARING' },
+  'kpi.foundInCR':     { en: 'Found in Collection Record', zh: '在收款記錄中找到' },
+  'kpi.pmReceived':    { en: 'PayMaya Received (bank)', zh: 'PayMaya 收到（銀行）' },
+  'kpi.crsInstapay':   { en: 'CRS RDIST + INSTAPAY credits', zh: 'CRS RDIST + INSTAPAY 入賬' },
+  'kpi.settlementDays':{ en: 'Settlement Days', zh: '結算日數' },
+  'kpi.daysWithPm':    { en: 'Days with PayMaya credits', zh: '有 PayMaya 入賬的日數' },
+  'kpi.netExpected':   { en: 'Net Expected', zh: '預計淨額' },
+  'kpi.variance':      { en: 'Variance', zh: '差額' },
+  'kpi.needsPmReport': { en: 'Needs PayMaya report', zh: '需 PayMaya 報表' },
+  'kpi.totalTxns':     { en: 'Total Transactions', zh: '總交易數' },
+  'kpi.allCardTypes':  { en: 'All card types', zh: '所有卡別' },
+  'kpi.grossAmount':   { en: 'Gross Amount', zh: '總金額' },
+  'kpi.beforeFees':    { en: 'Before processing fees', zh: '未扣手續費前' },
+  'kpi.totalFees':     { en: 'Total Fees', zh: '總手續費' },
+  'kpi.mdrDeducted':   { en: 'MDR charges deducted', zh: '已扣商戶手續費' },
+  'kpi.toSettle':      { en: 'To be settled to bank', zh: '待結算至銀行' },
+
+  // Badges / statuses
+  'badge.covered':   { en: '✓ Covered', zh: '✓ 足夠' },
+  'badge.tight':     { en: '⚡ Tight', zh: '⚡ 緊張' },
+  'badge.shortfall': { en: '⚠ Shortfall', zh: '⚠ 不足' },
+  'badge.noClearing':{ en: 'No Clearing', zh: '無兌現' },
+  'badge.ok':        { en: '✓ OK', zh: '✓ 正常' },
+  'badge.noActivity':{ en: 'No Activity', zh: '無活動' },
+  'badge.collected': { en: '✓ Collected', zh: '✓ 已兌現' },
+  'badge.notFound':  { en: '🔴 Not Found', zh: '🔴 找不到' },
+  'badge.notInCR':   { en: '⚠ Not in Collection Record', zh: '⚠ 不在收款記錄' },
+  'badge.matched':   { en: '✓ Matched', zh: '✓ 已對賬' },
+  'badge.varianceFlag':{ en: '⚠ Variance', zh: '⚠ 有差額' },
+  'badge.awaitingReport':{ en: 'Awaiting report', zh: '待報表' },
+  'badge.unmatched': { en: 'unmatched', zh: '未配對' },
+
+  // Misc cell text
+  'cell.sameDay':  { en: 'Same day', zh: '當天' },
+  'cell.actual':   { en: 'actual', zh: '實際' },
+  'word.total':    { en: 'Total', zh: '總計' },
+
+  // Bank statement type labels
+  'type.cheque':   { en: 'INCLEARING', zh: 'INCLEARING' },
+  'type.deposit':  { en: 'Cash Deposit', zh: '現金存款' },
+  'type.gcash':    { en: 'GCash Deposit', zh: 'GCash 存款' },
+  'type.paymaya':  { en: 'PayMaya / Remittance', zh: 'PayMaya / 匯款' },
+  'type.usd':      { en: 'USD Check', zh: '美元支票' },
+  'type.transfer': { en: 'Transfer', zh: '轉賬' },
+  'type.other':    { en: 'Other', zh: '其他' },
+
+  // Status bar
+  'status.live':         { en: 'Live Data', zh: '即時資料' },
+  'status.updated':      { en: 'Updated {time}', zh: '更新於 {time}' },
+  'status.connecting':   { en: 'Connecting…', zh: '連接中…' },
+  'status.readingSheets':{ en: 'Reading Google Sheets', zh: '正在讀取 Google Sheets' },
+  'status.notConnected': { en: 'Not Connected', zh: '未連接' },
+  'status.retry':        { en: 'No live data — click ↻ to retry', zh: '無即時資料——按 ↻ 重試' },
+
+  // Connection banner (HTML)
+  'banner.notConnected': {
+    en: '<span>⛔</span><div><strong>Not connected to live data.</strong> The dashboard could not read your Google Sheets, so no figures are shown. Check your internet connection and click the <strong>↻ refresh</strong> button in the sidebar to retry.</div>',
+    zh: '<span>⛔</span><div><strong>未連接即時資料。</strong>儀表板無法讀取你的 Google Sheets，因此沒有顯示任何數字。請檢查網絡連線，並按側欄的 <strong>↻ 重新整理</strong> 按鈕重試。</div>'
+  },
+
+  // Empty states
+  'empty.p1':       { en: 'No cheque entries for the selected date range.', zh: '所選日期範圍內沒有支票記錄。' },
+  'empty.p2':       { en: 'No forecast data for the selected date range.', zh: '所選日期範圍內沒有預測資料。' },
+  'empty.p3':       { en: 'No collection entries for the selected date range.', zh: '所選日期範圍內沒有收款記錄。' },
+  'empty.p3nfOk':   { en: '✓ All recorded cheques in this range were found clearing in the bank.', zh: '✓ 此範圍內所有已記錄支票均已在銀行兌現。' },
+  'empty.p4unmOk':  { en: 'No unmatched entries in this date range ✓', zh: '此日期範圍內沒有未配對交易 ✓' },
+  'empty.p4stmt':   { en: 'No bank transactions in this date range.', zh: '此日期範圍內沒有銀行交易。' },
+  'empty.p5card':   { en: 'Per-card-type breakdown needs the PayMaya settlement report (not yet connected).', zh: '按卡別的明細需要 PayMaya 結算報表（尚未連接）。' },
+  'empty.p5batch':  { en: 'No PayMaya credits in the selected date range.', zh: '所選日期範圍內沒有 PayMaya 入賬。' },
+
+  // Page 1 panel header
+  'ph1.coverage':   { en: 'Cheque Coverage', zh: '支票覆蓋' },
+  'ph1.days':       { en: '{n} day(s)', zh: '{n} 天' },
+
+  // Login errors
+  'err.wrongPw':    { en: 'Incorrect password. Please try again.', zh: '密碼錯誤，請再試一次。' },
+  'err.cantConnect':{ en: 'Could not connect. Check your internet and try again.', zh: '無法連接。請檢查網絡後再試。' },
+  'login.checking': { en: 'Checking…', zh: '驗證中…' },
+};
+
+function t(key, vars) {
+  const entry = I18N[key];
+  let s = entry ? (entry[lang] ?? entry.en) : key;
+  if (vars) Object.keys(vars).forEach(k => { s = s.replace('{' + k + '}', vars[k]); });
+  return s;
+}
+
+// Apply translations to all static [data-i18n*] elements
+function applyStaticI18n() {
+  document.documentElement.lang = (lang === 'zh' ? 'zh-Hant' : 'en');
+  document.querySelectorAll('[data-i18n]').forEach(el => { el.innerHTML = t(el.dataset.i18n); });
+  document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.dataset.i18nHtml); });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
+  document.querySelectorAll('[data-lang-btn]').forEach(b => b.classList.toggle('active', b.dataset.langBtn === lang));
+}
+
+function setLang(l) {
+  lang = l;
+  localStorage.setItem('cashflow_lang', l);
+  applyStaticI18n();
+  // Rebuild pickers (preset labels) and re-render everything dynamic
+  ['p1','p2','p3','p4','p5'].forEach(pid => {
+    const c = document.getElementById(`drp-${pid}`);
+    if (c) { c.innerHTML = buildPicker(pid); refreshPickerLabel(pid); }
+  });
+  renderAll();
+  if (document.getElementById('p2').classList.contains('active')) renderP2();
+  setDataStatus(dataConnected ? 'live' : 'disconnected', lastFetchedAt);
+}
+
+// ══════════════════════════════════════════════════════════
+// LIVE DATA CONFIG
+// Paste your Apps Script deployment URL here after deploying Code.gs
+// ══════════════════════════════════════════════════════════
+
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbytFi49eJ1DynQib1OKfvy7ndGFTpc1naPB4TYRDlRq4TBiR_Nz8GFsoy-id0zzQt6gUQ/exec';
+let lastFetchedAt = null;  // remember for re-rendering the status on language switch
+
+// ══════════════════════════════════════════════════════════
+// DATA — populated live from Google Sheets (no fake fallback)
+// ══════════════════════════════════════════════════════════
+
+let startBal = 0;          // set from sheet later; editable in sidebar
+let dataConnected = false; // true once live data successfully loads
+
+const schedule         = [];  // cheque clearing totals per day (from Collection Record)
+const depsMap          = {};  // editable expected deposits, keyed by date
+const collectionRecord = [];  // raw CR entries { d, amount }
+const bankStatement    = [];  // raw bank rows { d, desc, type, debit, credit, chequeNo }
+const cardTypes        = [];  // PayMaya per-card-type breakdown (separate source — not yet wired)
+const batches          = [];  // PayMaya settlement batches (derived from bank PayMaya credits)
+
+// ══════════════════════════════════════════════════════════
+// MATCHING ALGORITHM
+// Greedy, consume-on-match: for each CR entry (earliest first)
+// find the nearest bank INCLEARING with the same amount on or
+// after the expected clearing date. Both are consumed on match.
+// Amounts are compared to FULL precision (4 dp) so a wrong decimal
+// input (e.g. 50,655.12 vs 50,655.21) correctly fails to match and
+// surfaces as Not Found / Unmatched for the owner to investigate.
+// ══════════════════════════════════════════════════════════
+
+const cents = n => Math.round(n * 10000); // 4-dp key, exact for currency
+
+function runMatching() {
+  const poolA = collectionRecord.map(r => ({ ...r, consumed: false, clearedDate: null, chequeNo: null }));
+  const poolB = bankStatement.filter(r => r.type === 'cheque').map(r => ({ ...r, consumed: false }));
+  poolA.sort((a, b) => a.d < b.d ? -1 : 1);
+  poolA.forEach(entry => {
+    const cands = poolB.filter(b =>
+      !b.consumed &&
+      cents(b.debit) === cents(entry.amount) &&
+      b.d >= entry.d
+    );
+    if (!cands.length) return;
+    cands.sort((a, b) => a.d < b.d ? -1 : 1);
+    const best = cands[0];
+    best.consumed    = true;
+    entry.consumed   = true;
+    entry.clearedDate = best.d;
+    entry.chequeNo   = best.chequeNo || null;
+  });
+  return { matchResults: poolA, unmatchedBank: poolB.filter(b => !b.consumed) };
+}
+
+let matchResults = [];
+let unmatchedBank = [];
+
+function rerunMatching() {
+  const r = runMatching();
+  matchResults  = r.matchResults;
+  unmatchedBank = r.unmatchedBank;
+}
+
+// ══════════════════════════════════════════════════════════
+// LIVE DATA LOADING (JSONP — works from file:// and GitHub Pages)
+// ══════════════════════════════════════════════════════════
+
+// Password is entered at login and sent with every request. It is
+// validated server-side, so it is never stored in the page source.
+let accessPw = sessionStorage.getItem('cashflow_pw') || '';
+
+function loadLiveData() {
+  return new Promise(resolve => {
+    if (!SCRIPT_URL || SCRIPT_URL.includes('PASTE_YOUR')) { resolve(null); return; }
+
+    const cb    = '__cashflowCb_' + Date.now();
+    const timer = setTimeout(() => { delete window[cb]; resolve(null); }, 15000);
+
+    window[cb] = data => {
+      clearTimeout(timer);
+      delete window[cb];
+      resolve(data);
+    };
+
+    const s = document.createElement('script');
+    s.src = SCRIPT_URL + '?pw=' + encodeURIComponent(accessPw) + '&callback=' + cb;
+    s.onerror = () => { clearTimeout(timer); delete window[cb]; resolve(null); };
+    document.head.appendChild(s);
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// LOGIN
+// ══════════════════════════════════════════════════════════
+
+async function submitLogin() {
+  const input = document.getElementById('loginPw');
+  const btn   = document.getElementById('loginBtn');
+  const err   = document.getElementById('loginErr');
+  accessPw = input.value;
+  err.textContent = '';
+  btn.disabled = true;
+  btn.textContent = t('login.checking');
+
+  const data = await loadLiveData();
+
+  btn.disabled = false;
+  btn.textContent = t('login.unlock');
+
+  if (data && !data.error) {
+    sessionStorage.setItem('cashflow_pw', accessPw);
+    document.getElementById('loginOverlay').style.display = 'none';
+    applyLiveData(data);
+    setDataStatus('live', data.fetchedAt);
+  } else if (data && data.error === 'unauthorized') {
+    err.textContent = t('err.wrongPw');
+    accessPw = '';
+  } else {
+    err.textContent = t('err.cantConnect');
+  }
+}
+
+function applyLiveData(data) {
+  // Rebuild schedule: group CR entries by date, sum amounts
+  const grouped = {};
+  data.collection.forEach(r => { grouped[r.date] = (grouped[r.date] || 0) + r.amount; });
+  const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  schedule.splice(0, schedule.length,
+    ...Object.entries(grouped)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([date, total]) => ({
+        d:   date,
+        lbl: days[new Date(date + 'T00:00:00').getDay()],
+        chq: Math.round(total * 100) / 100,
+      }))
+  );
+
+  // Normalize and replace collectionRecord (live uses 'date', internal uses 'd')
+  collectionRecord.splice(0, collectionRecord.length,
+    ...data.collection.map(r => ({ d: r.date, amount: r.amount }))
+  );
+
+  // Normalize and replace bankStatement.
+  // Reclassify PGW INSTAPAY (GCash account deposits) as 'gcash' — NOT PayMaya.
+  // Only CRS RDIST is true PayMaya settlement.
+  bankStatement.splice(0, bankStatement.length,
+    ...data.bank.map(r => ({
+      d:        r.date,
+      desc:     r.description,
+      type:     /PGW INSTAPAY/i.test(r.description) ? 'gcash' : r.type,
+      debit:    r.debit,
+      credit:   r.credit,
+      chequeNo: r.chequeNo || null,
+    }))
+  );
+
+  // Derive PayMaya settlement batches from real bank PayMaya credits, grouped by date.
+  // "Bank Received" is real; "Net Expected" awaits the PayMaya terminal report.
+  const pmByDate = {};
+  bankStatement.forEach(r => {
+    if (r.type === 'paymaya' && r.credit > 0) {
+      pmByDate[r.d] = (pmByDate[r.d] || 0) + r.credit;
     }
+  });
+  batches.splice(0, batches.length,
+    ...Object.entries(pmByDate)
+      .sort(([a],[b]) => b.localeCompare(a))
+      .map(([date, rcv]) => ({ d: date, netExp: null, bankRcv: rcv }))
+  );
 
-    return reply({
-      collection: readCollectionRecord(),
-      bank:       readBankStatement(),
-      fetchedAt:  new Date().toISOString(),
+  dataConnected = true;
+  rerunMatching();
+  renderAll();
+  if (document.getElementById('p2').classList.contains('active')) renderP2();
+  renderConnBanners();
+}
+
+function setDataStatus(state, fetchedAt) {
+  const dot   = document.getElementById('statusDot');
+  const label = document.getElementById('statusLabel');
+  const time  = document.getElementById('statusTime');
+  dot.className = 'status-dot ' + state;
+  if (state === 'live') {
+    lastFetchedAt = fetchedAt || lastFetchedAt;
+    label.textContent = t('status.live');
+    const d = lastFetchedAt ? new Date(lastFetchedAt) : new Date();
+    time.textContent  = t('status.updated', { time: d.toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit' }) });
+  } else if (state === 'loading') {
+    label.textContent = t('status.connecting');
+    time.textContent  = t('status.readingSheets');
+  } else {
+    label.textContent = t('status.notConnected');
+    time.textContent  = t('status.retry');
+  }
+}
+
+// Show a red "not connected" banner on every page until live data loads.
+function renderConnBanners() {
+  document.querySelectorAll('.conn-banner').forEach(el => {
+    if (dataConnected) {
+      el.style.display = 'none';
+    } else {
+      el.style.display = 'flex';
+      el.innerHTML = t('banner.notConnected');
+    }
+  });
+}
+
+async function refreshData() {
+  setDataStatus('loading');
+  const data = await loadLiveData();
+  if (data && !data.error) {
+    applyLiveData(data);
+    setDataStatus('live', data.fetchedAt);
+  } else {
+    dataConnected = false;
+    renderConnBanners();
+    setDataStatus('disconnected');
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// DATE RANGE PICKER
+// ══════════════════════════════════════════════════════════
+
+const DRP_PRESETS = [
+  { id:'today',        key:'preset.today'        },
+  { id:'yesterday',    key:'preset.yesterday'    },
+  { id:'this_week',    key:'preset.this_week'    },
+  { id:'last_week',    key:'preset.last_week'    },
+  { id:'this_month',   key:'preset.this_month'   },
+  { id:'last_month',   key:'preset.last_month'   },
+  { id:'this_quarter', key:'preset.this_quarter' },
+  { id:'last_quarter', key:'preset.last_quarter' },
+  { id:'this_year',    key:'preset.this_year'    },
+  { id:'last_year',    key:'preset.last_year'    },
+  { id:'custom',       key:'preset.custom'       },
+];
+
+// Balance vs Cheques (Page 1) uses its own preset list and never shows
+// dates beyond today.
+const DRP_PRESETS_P1 = [
+  { id:'today',        key:'preset.today'         },
+  { id:'yesterday',    key:'preset.yesterday'     },
+  { id:'last_7_days',  key:'preset.last_7_days'   },
+  { id:'last_30_days', key:'preset.last_30_days'  },
+  { id:'last_week',    key:'preset.last_week'     },
+  { id:'last_2_weeks', key:'preset.last_2_weeks'  },
+  { id:'last_month',   key:'preset.last_month'    },
+  { id:'this_month',   key:'preset.this_month_td' },
+  { id:'custom',       key:'preset.custom'        },
+];
+
+// Page 1 and both Outstanding Cheques pickers (o1/o2) use the to-date list.
+const TO_DATE_PICKERS = ['p1', 'o1', 'o2'];
+const presetsFor = pid => (TO_DATE_PICKERS.includes(pid) ? DRP_PRESETS_P1 : DRP_PRESETS);
+
+// Per-page filter state
+const drpState = {};
+// p1-p5 = page pickers; o1/o2 = Outstanding Cheques pickers for Page 1 & 2
+['p1','p2','p3','p4','p5','o1','o2'].forEach(p => {
+  drpState[p] = { preset: 'this_month', customFrom: '', customTo: '' };
+});
+
+function buildPicker(pid) {
+  const presets = presetsFor(pid);
+  const current = drpState[pid].preset;
+  const items = presets.map(p => {
+    const divider = (p.id === 'custom') ? '<div class="drp-divider"></div>' : '';
+    return `${divider}<div class="drp-item${p.id === current ? ' active' : ''}" data-preset="${p.id}" onclick="selectPreset('${pid}','${p.id}')">${t(p.key)}</div>`;
+  }).join('');
+
+  return `
+    <div class="drp-wrap" id="drp-wrap-${pid}">
+      <button class="drp-trigger" onclick="toggleDrp(event,'${pid}')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span class="drp-label" id="drp-label-${pid}">This Month</span>
+        <span class="drp-range" id="drp-range-${pid}"></span>
+        <svg class="drp-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="drp-panel" id="drp-panel-${pid}" onclick="event.stopPropagation()">
+        <div class="drp-list">${items}</div>
+        <div class="drp-custom-pane" id="drp-cp-${pid}">
+          <div class="drp-field">
+            <label>${t('drp.from')}</label>
+            <input type="date" id="drp-from-${pid}" class="drp-date-input">
+          </div>
+          <div class="drp-field">
+            <label>${t('drp.to')}</label>
+            <input type="date" id="drp-to-${pid}" class="drp-date-input">
+          </div>
+          <button class="drp-apply" onclick="applyCustom('${pid}')">${t('drp.apply')}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function toggleDrp(e, pid) {
+  e.stopPropagation();
+  const panel = document.getElementById(`drp-panel-${pid}`);
+  const isOpen = panel.classList.contains('open');
+  document.querySelectorAll('.drp-panel.open').forEach(p => p.classList.remove('open'));
+  if (!isOpen) panel.classList.add('open');
+}
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.drp-panel.open').forEach(p => p.classList.remove('open'));
+});
+
+function selectPreset(pid, preset) {
+  drpState[pid].preset = preset;
+  document.querySelectorAll(`#drp-panel-${pid} .drp-item`).forEach(el => {
+    el.classList.toggle('active', el.dataset.preset === preset);
+  });
+  const cp = document.getElementById(`drp-cp-${pid}`);
+  cp.classList.toggle('visible', preset === 'custom');
+  if (preset !== 'custom') {
+    refreshPickerLabel(pid);
+    document.getElementById(`drp-panel-${pid}`).classList.remove('open');
+    rerenderPage(pid);
+  }
+}
+
+function applyCustom(pid) {
+  drpState[pid].customFrom = document.getElementById(`drp-from-${pid}`).value;
+  drpState[pid].customTo   = document.getElementById(`drp-to-${pid}`).value;
+  refreshPickerLabel(pid);
+  document.getElementById(`drp-panel-${pid}`).classList.remove('open');
+  rerenderPage(pid);
+}
+
+function refreshPickerLabel(pid) {
+  const state  = drpState[pid];
+  const preset = presetsFor(pid).find(p => p.id === state.preset);
+  document.getElementById(`drp-label-${pid}`).textContent = preset ? t(preset.key) : 'Date Range';
+  const range = getRange(pid);
+  const rangeEl = document.getElementById(`drp-range-${pid}`);
+  rangeEl.textContent = (range.from && range.to)
+    ? `${fmtShort(range.from)} – ${fmtShort(range.to)}`
+    : '';
+}
+
+function getRange(pid) {
+  const s = drpState[pid];
+  let range = (s.preset === 'custom')
+    ? { from: s.customFrom, to: s.customTo }
+    : computeRange(s.preset);
+  // Page 1 and Outstanding pickers never extend beyond today.
+  if (TO_DATE_PICKERS.includes(pid) && range.to && range.to > TODAY) range = { from: range.from, to: TODAY };
+  return range;
+}
+
+function computeRange(preset) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  const fmt = d => d.toISOString().slice(0, 10);
+  const monday = d => { const r = new Date(d); const dow = r.getDay(); r.setDate(r.getDate() - (dow === 0 ? 6 : dow - 1)); return r; };
+  const ago = n => { const d = new Date(now); d.setDate(d.getDate() - n); return fmt(d); };
+
+  switch (preset) {
+    case 'today':        return { from: fmt(now), to: fmt(now) };
+    case 'yesterday':    { const d = new Date(now); d.setDate(d.getDate()-1); return { from:fmt(d), to:fmt(d) }; }
+    case 'last_7_days':  return { from: ago(6),  to: fmt(now) };   // rolling 7 days, ending today
+    case 'last_30_days': return { from: ago(29), to: fmt(now) };   // rolling 30 days, ending today
+    case 'last_2_weeks': return { from: ago(13), to: fmt(now) };   // rolling 14 days, ending today
+    case 'this_week':    { const mon = monday(now); const sun = new Date(mon); sun.setDate(mon.getDate()+6); return { from:fmt(mon), to:fmt(sun) }; }
+    case 'last_week':    { const mon = monday(now); const lm = new Date(mon); lm.setDate(mon.getDate()-7); const ls = new Date(mon); ls.setDate(mon.getDate()-1); return { from:fmt(lm), to:fmt(ls) }; }
+    case 'this_month':   return { from: fmt(new Date(y,m,1)),   to: fmt(new Date(y,m+1,0)) };
+    case 'last_month':   return { from: fmt(new Date(y,m-1,1)), to: fmt(new Date(y,m,0)) };
+    case 'this_quarter': { const q=Math.floor(m/3); return { from:fmt(new Date(y,q*3,1)), to:fmt(new Date(y,q*3+3,0)) }; }
+    case 'last_quarter': { const q=Math.floor(m/3); const lq=q===0?3:q-1; const ly=q===0?y-1:y; return { from:fmt(new Date(ly,lq*3,1)), to:fmt(new Date(ly,lq*3+3,0)) }; }
+    case 'this_year':    return { from:`${y}-01-01`, to:`${y}-12-31` };
+    case 'last_year':    return { from:`${y-1}-01-01`, to:`${y-1}-12-31` };
+    default:             return { from: null, to: null };
+  }
+}
+
+function inRange(dateStr, range) {
+  if (!range.from && !range.to) return true;
+  if (range.from && dateStr < range.from) return false;
+  if (range.to   && dateStr > range.to)   return false;
+  return true;
+}
+
+function emptyRow(cols, msg) {
+  return `<tr class="empty-row"><td colspan="${cols}">${msg}</td></tr>`;
+}
+
+// ══════════════════════════════════════════════════════════
+// OUTSTANDING RECEIVABLES
+// ══════════════════════════════════════════════════════════
+
+const TODAY = new Date().toISOString().slice(0, 10);
+
+function monthStart() {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`;
+}
+
+// "Deduct from balance" checkbox state per page
+const outInclude = { p1: true, p2: true };
+
+// Outstanding picker id for a page: p1 → o1, p2 → o2
+const outPicker = pageId => 'o' + pageId.slice(1);
+
+// All unmatched cheques whose expected date falls in the outstanding picker range
+function outstandingList(pageId) {
+  const range = getRange(outPicker(pageId));
+  return matchResults.filter(r => !r.consumed && inRange(r.d, range));
+}
+
+function getOutstanding(pageId) {
+  if (!outInclude[pageId]) return 0;
+  return outstandingList(pageId).reduce((s, r) => s + r.amount, 0);
+}
+
+function buildOutBar(pageId) {
+  const oid = outPicker(pageId);
+  return `
+    <div class="out-bar">
+      <span class="out-title">${t('out.title')}</span>
+      ${buildPicker(oid)}
+      <span class="out-total" id="out-amt-${pageId}"></span>
+      <span class="out-cnt" id="out-cnt-${pageId}"></span>
+      <label class="out-toggle">
+        <input type="checkbox" id="out-inc-${pageId}" ${outInclude[pageId] ? 'checked' : ''} onchange="onOutInclude('${pageId}')">
+        ${t('out.deduct')}
+      </label>
+    </div>`;
+}
+
+function renderOutBars() {
+  ['p1','p2'].forEach(pageId => {
+    const el = document.getElementById(`out-${pageId}`);
+    if (el) {
+      el.innerHTML = buildOutBar(pageId);
+      refreshPickerLabel(outPicker(pageId));
+      updateOutDisplay(pageId);
+    }
+  });
+}
+
+// Refresh just the amount + count text in the outstanding bar
+function updateOutDisplay(pageId) {
+  const list = outstandingList(pageId);
+  const amt  = list.reduce((s, r) => s + r.amount, 0);
+  const amtEl = document.getElementById(`out-amt-${pageId}`);
+  const cntEl = document.getElementById(`out-cnt-${pageId}`);
+  if (amtEl) amtEl.textContent = '−' + P(amt);
+  if (cntEl) cntEl.textContent = `${list.length} ${t('out.uncleared')} · ${outInclude[pageId] ? t('out.deducted') : t('out.notDeducted')}`;
+}
+
+// Called when the "Deduct from balance" checkbox toggles
+function onOutInclude(pageId) {
+  outInclude[pageId] = document.getElementById(`out-inc-${pageId}`).checked;
+  updateOutDisplay(pageId);
+  (pageId === 'p1' ? renderP1 : renderP2)();
+}
+
+// Called by the date picker (o1/o2) when its range changes
+function onOutRangeChange(pageId) {
+  updateOutDisplay(pageId);
+  (pageId === 'p1' ? renderP1 : renderP2)();
+}
+
+// ══════════════════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════════════════
+
+// P  → analysis / calculations: exactly 2 decimal places (e.g. ₱50,655.12)
+// PS → signed version of P
+const P  = n => '₱' + Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const PS = n => (n < 0 ? '−' : '') + P(n);
+
+// Pexact → raw amounts straight from the sheet: shows every decimal as written
+// (2 dp minimum, up to 6 to reveal wrong/extra-decimal inputs for matching).
+const Pexact = n => '₱' + Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 6 });
+const fmtDate  = s => new Date(s+'T00:00:00').toLocaleDateString('en-PH', { month:'short', day:'2-digit', year:'numeric' });
+const fmtShort = s => new Date(s+'T00:00:00').toLocaleDateString('en-PH', { month:'short', day:'2-digit' });
+const daysBetween = (d1, d2) => Math.round((new Date(d2+'T00:00:00') - new Date(d1+'T00:00:00')) / 86400000);
+
+// Group all bank credits (deposits + PayMaya + transfers in) by date
+function buildDailyCredits() {
+  const map = {};
+  bankStatement.forEach(r => {
+    if (r.credit > 0) map[r.d] = (map[r.d] || 0) + r.credit;
+  });
+  return map;
+}
+
+function coverBadge(bal, chq) {
+  if (chq === 0) return `<span class="badge b-none">${t('badge.noClearing')}</span>`;
+  const after = bal - chq;
+  if (after < 0)       return `<span class="badge b-short">${t('badge.shortfall')}</span>`;
+  if (after < 500000)  return `<span class="badge b-tight">${t('badge.tight')}</span>`;
+  return `<span class="badge b-covered">${t('badge.covered')}</span>`;
+}
+
+// ══════════════════════════════════════════════════════════
+// PAGE 1 — Balance vs Cheques
+// ══════════════════════════════════════════════════════════
+
+function renderP1() {
+  const range       = getRange('p1');
+  const outstanding = getOutstanding('p1');
+  const effectiveBal = startBal - outstanding;   // outstanding = pending outflows
+  const rows  = schedule.filter(r => inRange(r.d, range));
+  document.getElementById('ph1').textContent = t('ph1.coverage') + (rows.length ? ' — ' + t('ph1.days', { n: rows.length }) : '');
+
+  const dailyCredits = buildDailyCredits();
+  let run = effectiveBal, covered = 0, tight = 0, shortfall = 0, totalChq = 0, totalCredits = 0;
+  const tbody = document.getElementById('tb1');
+  tbody.innerHTML = '';
+
+  if (!rows.length) {
+    tbody.innerHTML = emptyRow(7, t('empty.p1'));
+  } else {
+    rows.forEach(row => {
+      const cr     = dailyCredits[row.d] || 0;
+      const before = run;
+      const after  = run + cr - row.chq;
+      totalChq     += row.chq;
+      totalCredits += cr;
+      if (after < 0)           shortfall++;
+      else if (after < 500000) tight++;
+      else                     covered++;
+      run = after;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${fmtDate(row.d)}</strong></td>
+        <td class="muted">${row.lbl}</td>
+        <td class="num">${row.chq ? P(row.chq) : '<span class="muted">—</span>'}</td>
+        <td class="num" style="color:#10b981">${cr ? '+' + P(cr) : '<span class="muted">—</span>'}</td>
+        <td class="num">${P(before)}</td>
+        <td class="num ${after < 0 ? 'neg' : ''}">${PS(after)}</td>
+        <td>${coverBadge(after, 0)}</td>
+      `;
+      tbody.appendChild(tr);
     });
-
-  } catch (err) {
-    return reply({ error: String(err) });
-  }
-}
-
-// ═══════════════════════════════════════════════════════
-// COLLECTION RECORD READER
-// Sheet columns: Date (DD/MM/YYYY) | Amount
-// Returns: [{ date: 'YYYY-MM-DD', amount: number }, ...]
-// ═══════════════════════════════════════════════════════
-
-function readCollectionRecord() {
-  const ss    = SpreadsheetApp.openById(CR_SHEET_ID);
-  const sheet = ss.getSheetByName(CR_TAB);
-  if (!sheet) throw new Error('Tab not found: ' + CR_TAB);
-
-  // getDisplayValues() returns the string exactly as shown in the cell,
-  // preventing Google Sheets from silently converting dates via locale.
-  const rows = sheet.getDataRange().getDisplayValues();
-  const fmt  = detectDateFormat(rows, 0);   // auto-detect DD/MM vs MM/DD
-  const out  = [];
-
-  for (let i = 1; i < rows.length; i++) {
-    const date   = toISO(rows[i][0], fmt);
-    const amount = parseAmt(rows[i][1]);
-    if (date && amount > 0) out.push({ date, amount });
   }
 
-  return out;
+  document.getElementById('kpi1').innerHTML = `
+    <div class="kpi ${effectiveBal < 0 ? 'red' : 'blue'}"><div class="kpi-label">${t('kpi.effAvailBal')}</div><div class="kpi-value">${PS(effectiveBal)}</div><div class="kpi-sub">${t('kpi.bankPlusOut', { bank: P(startBal), out: P(outstanding) })}</div></div>
+    <div class="kpi green"><div class="kpi-label">${t('kpi.totalCredits')}</div><div class="kpi-value">${P(totalCredits)}</div><div class="kpi-sub">${t('kpi.creditsSub')}</div></div>
+    <div class="kpi"><div class="kpi-label">${t('kpi.totalCheques')}</div><div class="kpi-value">${P(totalChq)}</div><div class="kpi-sub">${t('kpi.clearedFromAcct')}</div></div>
+    <div class="kpi ${shortfall > 0 ? 'red' : covered > 0 ? 'green' : 'amber'}">
+      <div class="kpi-label">${shortfall > 0 ? t('kpi.shortfallDays') : t('kpi.coveredDays')}</div>
+      <div class="kpi-value">${shortfall > 0 ? shortfall : covered}</div>
+      <div class="kpi-sub">${shortfall > 0 ? t('kpi.balNeg') : t('kpi.balOver500')}</div>
+    </div>
+  `;
 }
 
-// ═══════════════════════════════════════════════════════
-// CHINA BANK STATEMENT READER
-// Sheet columns (0-indexed):
-//   0  Date          MM/DD/YYYY
-//   1  Value Date
-//   2  Channel
-//   3  Branch
-//   4  Transaction Code
-//   5  Transaction Description
-//   6  Debit
-//   7  Credit
-//   8  Running Balance
-//   9  Cheque Number
-//   10 Checking
-// Returns: [{ date, description, type, debit, credit, chequeNo }, ...]
-// ═══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+// PAGE 2 — Cheque Forecast
+// ══════════════════════════════════════════════════════════
 
-function readBankStatement() {
-  const ss    = SpreadsheetApp.openById(BANK_SHEET_ID);
-  const sheet = ss.getSheetByName(BANK_TAB);
-  if (!sheet) throw new Error('Tab not found: ' + BANK_TAB);
 
-  // getDisplayValues() avoids locale-based date misinterpretation.
-  const rows = sheet.getDataRange().getDisplayValues();
-  const fmt  = detectDateFormat(rows, 0);   // auto-detect DD/MM vs MM/DD
-  const out  = [];
+function renderP2() {
+  const range = getRange('p2');
+  const data  = schedule
+    .filter(r => inRange(r.d, range))
+    .map(row => ({ ...row, dep: depsMap[row.d] || 0 }));
 
-  for (let i = 1; i < rows.length; i++) {
-    const row  = rows[i];
-    const date = toISO(row[0], fmt);
-    const desc = String(row[5] || '').trim();
+  // For past dates: use actual bank credits. For future: use user-entered deposits.
+  // Outstanding cheques are pending OUTFLOWS — deducted up front on Day 1.
+  const outstanding  = getOutstanding('p2');
+  const dailyCredits = buildDailyCredits();
+  let run = startBal;
+  const computed = data.map((row, i) => {
+    const rollIn    = (i === 0) ? outstanding : 0; // pending outflow applied on Day 1
+    const actualCr  = dailyCredits[row.d];          // from bank statement
+    const deposit   = actualCr !== undefined ? actualCr : (row.dep || 0); // prefer actual
+    const isActual  = actualCr !== undefined;
+    run = run + deposit - rollIn - row.chq;
+    return { ...row, deposit, isActual, rollIn, after: run };
+  });
 
-    if (!date || !desc) continue;
-    if (desc.toLowerCase().startsWith('grand')) continue; // skip totals row
+  let lowestBal = Infinity, lowestDate = '', shortfall = 0, totalChq = 0;
+  computed.forEach(r => {
+    totalChq += r.chq;
+    if (r.after < lowestBal) { lowestBal = r.after; lowestDate = fmtDate(r.d); }
+    if (r.after < 0) shortfall++;
+  });
 
-    out.push({
-      date,
-      description: desc,
-      type:     classify(desc),
-      debit:    parseAmt(row[6]),
-      credit:   parseAmt(row[7]),
-      chequeNo: row[9] ? String(row[9]).trim() : null,
+  document.getElementById('kpi2').innerHTML = `
+    <div class="kpi ${lowestBal < 0 ? 'red' : lowestBal < 500000 ? 'amber' : 'green'}">
+      <div class="kpi-label">${t('kpi.lowestBal')}</div><div class="kpi-value">${computed.length ? PS(lowestBal) : '—'}</div><div class="kpi-sub">${lowestDate || t('kpi.noData')}</div>
+    </div>
+    <div class="kpi"><div class="kpi-label">${t('kpi.totalChequesRange')}</div><div class="kpi-value">${P(totalChq)}</div><div class="kpi-sub">${t('kpi.inRange')}</div></div>
+    <div class="kpi ${shortfall > 0 ? 'red' : 'green'}"><div class="kpi-label">${t('kpi.shortfallDays')}</div><div class="kpi-value">${shortfall}</div><div class="kpi-sub">${shortfall === 0 ? t('kpi.allCovered') : t('kpi.projNeg')}</div></div>
+    <div class="kpi ${outstanding > 0 ? 'amber' : 'blue'}"><div class="kpi-label">${t('kpi.outDeducted')}</div><div class="kpi-value">−${P(outstanding)}</div><div class="kpi-sub">${t('kpi.pendingDay1')}</div></div>
+  `;
+
+  const tbody = document.getElementById('tb2');
+  tbody.innerHTML = '';
+
+  if (!computed.length) {
+    tbody.innerHTML = emptyRow(7, t('empty.p2'));
+  } else {
+    computed.forEach((r, i) => {
+      const a = r.after;
+      let badge;
+      if (r.chq === 0 && r.dep === 0) badge = `<span class="badge b-none">${t('badge.noActivity')}</span>`;
+      else if (a < 0)       badge = `<span class="badge b-short">${t('badge.shortfall')}</span>`;
+      else if (a < 500000)  badge = `<span class="badge b-tight">${t('badge.tight')}</span>`;
+      else                  badge = `<span class="badge b-covered">${t('badge.ok')}</span>`;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${fmtDate(r.d)}</strong></td>
+        <td class="muted">${r.lbl}</td>
+        <td class="num">${r.chq ? P(r.chq) : '<span class="muted">—</span>'}</td>
+        <td class="num">
+          ${r.isActual
+            ? `<span style="color:#10b981;font-weight:600">${P(r.deposit)}</span> <span class="muted" style="font-size:11px">${t('cell.actual')}</span>`
+            : `<input class="dep-input" type="text" value="${r.deposit ? r.deposit.toLocaleString() : ''}" placeholder="0" data-date="${r.d}" onchange="onDep(this)">`
+          }
+        </td>
+        <td class="num">${r.rollIn > 0 ? `<span class="neg">−${P(r.rollIn)}</span>` : '<span class="muted">—</span>'}</td>
+        <td class="num ${a < 0 ? 'neg' : ''}">${PS(a)}</td>
+        <td>${badge}</td>
+      `;
+      tbody.appendChild(tr);
     });
   }
 
-  return out;
 }
 
-// ═══════════════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════════════
-
-function classify(desc) {
-  if (desc.includes('INCLEARING'))           return 'cheque';
-  if (desc.includes('Cash Deposit No Book')) return 'deposit';
-  if (desc.includes('PGW INSTAPAY'))         return 'gcash';   // GCash account deposits (NOT PayMaya)
-  if (desc.includes('CRS RDIST'))            return 'paymaya'; // PayMaya settlement only
-  if (desc.includes('DEBIT ON US CHECK'))    return 'usd';
-  if (desc.includes('FUND TRANSFER') ||
-      desc.includes('INTRABANK'))            return 'transfer';
-  return 'other';
+function onDep(el) {
+  depsMap[el.dataset.date] = parseFloat(el.value.replace(/,/g, '')) || 0;
+  renderP2();
 }
 
-/**
- * Auto-detect whether a date column is DD/MM/YYYY or MM/DD/YYYY by scanning
- * for a disambiguating value (where one part is > 12). Falls back to 'MDY'.
- *
- * @param {Array<Array<string>>} rows  getDisplayValues() output
- * @param {number} colIdx             column index of the date
- * @return {string} 'DMY' or 'MDY'
- */
-function detectDateFormat(rows, colIdx) {
-  for (let i = 1; i < rows.length; i++) {
-    const str = String(rows[i][colIdx] || '').trim();
-    const p   = str.split('/');
-    if (p.length === 3) {
-      const first  = parseInt(p[0], 10);
-      const second = parseInt(p[1], 10);
-      if (first  > 12) return 'DMY';   // 17/05 → day-first
-      if (second > 12) return 'MDY';   // 05/29 → month-first
+function applyBulkDeposit() {
+  const val   = parseFloat(document.getElementById('bulkInput').value.replace(/,/g, '')) || 0;
+  const range = getRange('p2');
+  schedule.filter(r => inRange(r.d, range)).forEach(r => { depsMap[r.d] = val; });
+  renderP2();
+}
+
+function clearDeposits() {
+  const range = getRange('p2');
+  schedule.filter(r => inRange(r.d, range)).forEach(r => { depsMap[r.d] = 0; });
+  renderP2();
+}
+
+
+// ══════════════════════════════════════════════════════════
+// PAGE 3 — Collection Match
+// ══════════════════════════════════════════════════════════
+
+function renderP3() {
+  const range    = getRange('p3');
+  const filtered = matchResults.filter(r => inRange(r.d, range));
+
+  const total     = filtered.length;
+  const collected = filtered.filter(r => r.consumed).length;
+  const notFound  = total - collected;
+  const totalAmt  = filtered.reduce((s, r) => s + r.amount, 0);
+  const matchedAmt= filtered.filter(r => r.consumed).reduce((s, r) => s + r.amount, 0);
+
+  document.getElementById('badgeNotFound').textContent = matchResults.filter(r => !r.consumed).length;
+
+  document.getElementById('kpi3').innerHTML = `
+    <div class="kpi"><div class="kpi-label">${t('kpi.crEntries')}</div><div class="kpi-value">${total}</div><div class="kpi-sub">${t('kpi.expected', { amt: P(totalAmt) })}</div></div>
+    <div class="kpi green"><div class="kpi-label">${t('kpi.collected')}</div><div class="kpi-value">${collected}</div><div class="kpi-sub">${t('kpi.matchedInBank', { amt: P(matchedAmt) })}</div></div>
+    <div class="kpi ${notFound > 0 ? 'red' : 'green'}"><div class="kpi-label">${t('kpi.notFound')}</div><div class="kpi-value">${notFound}</div><div class="kpi-sub">${notFound > 0 ? t('kpi.noMatchBank') : t('kpi.allAccounted')}</div></div>
+    <div class="kpi ${!total || collected===total ? 'green' : notFound/total>0.2 ? 'red' : 'amber'}">
+      <div class="kpi-label">${t('kpi.collectionRate')}</div>
+      <div class="kpi-value">${total ? Math.round(collected/total*100)+'%' : '—'}</div>
+      <div class="kpi-sub">${t('kpi.matchedToBank')}</div>
+    </div>
+  `;
+
+  // ── Not Found table (only unmatched / uncleared cheques) ──
+  const notFoundRows = filtered.filter(r => !r.consumed);
+  const nfBody = document.getElementById('tb3nf');
+  nfBody.innerHTML = '';
+  if (!notFoundRows.length) {
+    nfBody.innerHTML = emptyRow(3, t('empty.p3nfOk'));
+  } else {
+    notFoundRows.forEach(r => {
+      const daysOut = daysBetween(r.d, TODAY);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${fmtDate(r.d)}</strong></td>
+        <td class="num"><strong>${Pexact(r.amount)}</strong></td>
+        <td class="num">${daysOut >= 0 ? `<span class="days-chip">${daysOut}d</span>` : '<span class="muted">—</span>'}</td>
+      `;
+      nfBody.appendChild(tr);
+    });
+  }
+
+  // ── Full Match Results table ──
+  const tbody = document.getElementById('tb3');
+  tbody.innerHTML = '';
+  if (!filtered.length) {
+    tbody.innerHTML = emptyRow(6, t('empty.p3'));
+    return;
+  }
+  filtered.forEach(r => {
+    const days = r.consumed ? daysBetween(r.d, r.clearedDate) : null;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${fmtDate(r.d)}</td>
+      <td class="num"><strong>${Pexact(r.amount)}</strong></td>
+      <td>${r.consumed ? `<span class="badge b-collected">${t('badge.collected')}</span>` : `<span class="badge b-notfound">${t('badge.notFound')}</span>`}</td>
+      <td>${r.consumed ? fmtDate(r.clearedDate) : '<span class="muted">—</span>'}</td>
+      <td class="num">${r.consumed ? `<span class="days-chip">${days === 0 ? t('cell.sameDay') : `+${days}d`}</span>` : '<span class="muted">—</span>'}</td>
+      <td>${r.chequeNo ? `<span style="font-size:12px;color:#64748b;font-family:monospace">${r.chequeNo}</span>` : '<span class="muted">—</span>'}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ══════════════════════════════════════════════════════════
+// PAGE 4 — Unmatched Bank Transactions
+// ══════════════════════════════════════════════════════════
+
+function renderP4() {
+  const range       = getRange('p4');
+  const filteredAll = bankStatement.filter(r => inRange(r.d, range));
+  const filteredUnm = unmatchedBank.filter(r => inRange(r.d, range));
+
+  document.getElementById('badgeUnmatched').textContent = unmatchedBank.length;
+
+  const totalUnmAmt = filteredUnm.reduce((s, r) => s + r.debit, 0);
+  const totalChqInRange = filteredAll.filter(r => r.type === 'cheque').length;
+
+  document.getElementById('kpi4').innerHTML = `
+    <div class="kpi ${filteredUnm.length > 0 ? 'red' : 'green'}">
+      <div class="kpi-label">${t('kpi.unmatchedEntries')}</div><div class="kpi-value">${filteredUnm.length}</div><div class="kpi-sub">${t('kpi.inclNoCR')}</div>
+    </div>
+    <div class="kpi ${filteredUnm.length > 0 ? 'amber' : 'green'}">
+      <div class="kpi-label">${t('kpi.totalUnmatched')}</div><div class="kpi-value">${P(totalUnmAmt)}</div><div class="kpi-sub">${t('kpi.clearedNoRecord')}</div>
+    </div>
+    <div class="kpi"><div class="kpi-label">${t('kpi.stmtLines')}</div><div class="kpi-value">${filteredAll.length}</div><div class="kpi-sub">${t('kpi.allTypesRange')}</div></div>
+    <div class="kpi green"><div class="kpi-label">${t('kpi.matchedIncl')}</div><div class="kpi-value">${totalChqInRange - filteredUnm.length}</div><div class="kpi-sub">${t('kpi.foundInCR')}</div></div>
+  `;
+
+  const tbody = document.getElementById('tb4');
+  tbody.innerHTML = '';
+  if (!filteredUnm.length) {
+    tbody.innerHTML = emptyRow(4, t('empty.p4unmOk'));
+  } else {
+    filteredUnm.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${fmtDate(r.d)}</strong></td>
+        <td style="font-size:12.5px">${r.desc}</td>
+        <td class="num neg"><strong>${Pexact(r.debit)}</strong></td>
+        <td><span class="badge b-unmatched">${t('badge.notInCR')}</span></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  const tb2 = document.getElementById('tb4b');
+  tb2.innerHTML = '';
+  const typeLabels = { cheque:t('type.cheque'), deposit:t('type.deposit'), gcash:t('type.gcash'), paymaya:t('type.paymaya'), usd:t('type.usd'), transfer:t('type.transfer'), other:t('type.other') };
+  if (!filteredAll.length) {
+    tb2.innerHTML = emptyRow(5, t('empty.p4stmt'));
+  } else {
+    filteredAll.forEach(r => {
+      const isUnm = r.type === 'cheque' && unmatchedBank.some(u => u.d === r.d && u.debit === r.debit);
+      const tr = document.createElement('tr');
+      tr.style.background = isUnm ? '#fff7ed' : '';
+      tr.innerHTML = `
+        <td>${fmtDate(r.d)}</td>
+        <td style="font-size:12.5px">${r.desc}${isUnm ? ` <span class="badge b-unmatched" style="font-size:10px;padding:1px 6px">${t('badge.unmatched')}</span>` : ''}</td>
+        <td class="muted" style="font-size:12px">${typeLabels[r.type]}</td>
+        <td class="num">${r.credit ? Pexact(r.credit) : '<span class="muted">—</span>'}</td>
+        <td class="num">${r.debit  ? Pexact(r.debit)  : '<span class="muted">—</span>'}</td>
+      `;
+      tb2.appendChild(tr);
+    });
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// PAGE 5 — PayMaya Match
+// ══════════════════════════════════════════════════════════
+
+function renderP5() {
+  const range          = getRange('p5');
+  const filteredBatches = batches.filter(r => inRange(r.d, range));
+
+  let totTxn = 0, totGross = 0, totFee = 0, totNet = 0;
+  const tbody = document.getElementById('tb5');
+  tbody.innerHTML = '';
+
+  if (!cardTypes.length) {
+    // Per-card-type fee breakdown comes from the PayMaya terminal report,
+    // which is not one of the two connected sheets.
+    tbody.innerHTML = emptyRow(6, t('empty.p5card'));
+    document.getElementById('tf5').innerHTML = '';
+  } else {
+    cardTypes.forEach(r => {
+      const fee = r.gross * r.rate;
+      const net = r.gross - fee;
+      totTxn += r.txns; totGross += r.gross; totFee += fee; totNet += net;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><strong>${r.type}</strong></td>
+        <td class="num">${r.txns.toLocaleString()}</td>
+        <td class="num">${P(r.gross)}</td>
+        <td class="num">${(r.rate*100).toFixed(2)}%</td>
+        <td class="num" style="color:#ef4444">−${P(fee)}</td>
+        <td class="num" style="color:#10b981"><strong>${P(net)}</strong></td>
+      `;
+      tbody.appendChild(tr);
+    });
+    document.getElementById('tf5').innerHTML = `
+      <tr><td>${t('word.total')}</td><td class="num">${totTxn.toLocaleString()}</td><td class="num">${P(totGross)}</td>
+      <td class="num muted">—</td><td class="num" style="color:#ef4444">−${P(totFee)}</td>
+      <td class="num" style="color:#10b981">${P(totNet)}</td></tr>
+    `;
+  }
+
+  // KPIs based on the live bank PayMaya credits in the selected range
+  const totalReceived = filteredBatches.reduce((s, b) => s + b.bankRcv, 0);
+  document.getElementById('kpi5').innerHTML = `
+    <div class="kpi green"><div class="kpi-label">${t('kpi.pmReceived')}</div><div class="kpi-value">${P(totalReceived)}</div><div class="kpi-sub">${t('kpi.crsInstapay')}</div></div>
+    <div class="kpi blue"><div class="kpi-label">${t('kpi.settlementDays')}</div><div class="kpi-value">${filteredBatches.length}</div><div class="kpi-sub">${t('kpi.daysWithPm')}</div></div>
+    <div class="kpi"><div class="kpi-label">${t('kpi.netExpected')}</div><div class="kpi-value muted">—</div><div class="kpi-sub">${t('kpi.needsPmReport')}</div></div>
+    <div class="kpi"><div class="kpi-label">${t('kpi.variance')}</div><div class="kpi-value muted">—</div><div class="kpi-sub">${t('kpi.needsPmReport')}</div></div>
+  `;
+
+  const tb = document.getElementById('tb5b');
+  tb.innerHTML = '';
+  if (!filteredBatches.length) {
+    tb.innerHTML = emptyRow(5, t('empty.p5batch'));
+  } else {
+    filteredBatches.forEach(b => {
+      const hasExpected = b.netExp !== null && b.netExp !== undefined;
+      const variance = hasExpected ? b.bankRcv - b.netExp : null;
+      const matched  = hasExpected && Math.abs(variance) < 1;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${fmtDate(b.d)}</td>
+        <td class="num">${hasExpected ? P(b.netExp) : '<span class="muted">—</span>'}</td>
+        <td class="num">${P(b.bankRcv)}</td>
+        <td class="num ${hasExpected && variance < 0 ? 'neg' : ''}">${!hasExpected ? '<span class="muted">—</span>' : (matched ? '<span class="muted">—</span>' : PS(variance))}</td>
+        <td>${!hasExpected ? `<span class="badge b-none">${t('badge.awaitingReport')}</span>` : (matched ? `<span class="badge b-collected">${t('badge.matched')}</span>` : `<span class="badge b-notfound">${t('badge.varianceFlag')}</span>`)}</td>
+      `;
+      tb.appendChild(tr);
+    });
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// CSV DOWNLOAD
+// ══════════════════════════════════════════════════════════
+
+function toCSV(headers, rows) {
+  const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  return [headers, ...rows].map(r => r.map(escape).join(',')).join('\n');
+}
+
+function triggerDownload(csv, filename) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadNotFound() {
+  const range = getRange('p3');
+  const rows  = matchResults
+    .filter(r => !r.consumed && inRange(r.d, range))
+    .sort((a, b) => a.d < b.d ? -1 : 1)
+    .map(r => [r.d, r.amount, daysBetween(r.d, TODAY)]);
+  triggerDownload(
+    toCSV(['Expected Date', 'Amount', 'Days Outstanding'], rows),
+    'not_found_cheques.csv'
+  );
+}
+
+function downloadUnmatched() {
+  const range = getRange('p4');
+  const rows  = unmatchedBank
+    .filter(r => inRange(r.d, range))
+    .map(r => [r.d, r.desc, r.debit]);
+  triggerDownload(
+    toCSV(['Bank Date', 'Description', 'Amount Cleared'], rows),
+    'unmatched_inclearing.csv'
+  );
+}
+
+function downloadBankStatement() {
+  const range = getRange('p4');
+  const rows  = bankStatement
+    .filter(r => inRange(r.d, range))
+    .map(r => [r.d, r.desc, r.type, r.credit || '', r.debit || '']);
+  triggerDownload(
+    toCSV(['Date', 'Description', 'Type', 'Credit', 'Debit'], rows),
+    'bank_statement.csv'
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// NAV
+// ══════════════════════════════════════════════════════════
+
+function nav(id, idx) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  document.querySelectorAll('.nav-item')[idx].classList.add('active');
+  if (id === 'p2') renderP2();
+}
+
+// ══════════════════════════════════════════════════════════
+// BALANCE CHANGE
+// ══════════════════════════════════════════════════════════
+
+function onBalanceChange(el) {
+  startBal = parseFloat(el.value.replace(/,/g, '')) || 0;
+  el.value = startBal ? startBal.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+  renderP1();
+  if (document.getElementById('p2').classList.contains('active')) renderP2();
+}
+
+function rerenderPage(pid) {
+  if (pid === 'o1') return onOutRangeChange('p1');
+  if (pid === 'o2') return onOutRangeChange('p2');
+  ({ p1:renderP1, p2:renderP2, p3:renderP3, p4:renderP4, p5:renderP5 })[pid]?.();
+}
+
+function renderAll() {
+  renderOutBars();
+  renderP1();
+  renderP3();
+  renderP4();
+  renderP5();
+}
+
+// ══════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════
+
+async function init() {
+  // Apply the chosen language to all static labels first
+  applyStaticI18n();
+
+  // Build pickers and render empty shells first (behind the login overlay)
+  rerunMatching();
+  ['p1','p2','p3','p4','p5'].forEach(pid => {
+    document.getElementById(`drp-${pid}`).innerHTML = buildPicker(pid);
+    refreshPickerLabel(pid);
+  });
+  renderAll();
+  renderConnBanners();
+  setDataStatus('disconnected');
+
+  // If a password was remembered this session, try to auto-unlock.
+  if (accessPw) {
+    setDataStatus('loading');
+    const data = await loadLiveData();
+    if (data && !data.error) {
+      document.getElementById('loginOverlay').style.display = 'none';
+      applyLiveData(data);
+      setDataStatus('live', data.fetchedAt);
+      return;
     }
-  }
-  return 'MDY'; // default if every value is ambiguous (both parts ≤ 12)
-}
-
-/**
- * Convert a date value to YYYY-MM-DD.
- * Always uses Asia/Manila to prevent off-by-one timezone errors.
- *
- * @param {Date|string} val
- * @param {string} fmt  'DMY' = DD/MM/YYYY  |  'MDY' = MM/DD/YYYY
- */
-function toISO(val, fmt) {
-  // With getDisplayValues(), val is always the string shown in the cell —
-  // no locale-based Date object conversion by Sheets.
-  // Kept as fallback in case a Date object arrives from elsewhere.
-  if (val instanceof Date) {
-    return Utilities.formatDate(val, 'Asia/Manila', 'yyyy-MM-dd');
+    // Stored password no longer valid — clear it and show login.
+    sessionStorage.removeItem('cashflow_pw');
+    accessPw = '';
+    setDataStatus('disconnected');
   }
 
-  const str = String(val).trim();
-  if (!str) return null;
-
-  // Already YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-
-  // Slash-delimited: DD/MM/YYYY (DMY) or MM/DD/YYYY (MDY)
-  const p = str.split('/');
-  if (p.length === 3) {
-    const [day, month, year] = (fmt === 'DMY') ? p : [p[1], p[0], p[2]];
-    if (year && year.length >= 4) {
-      return year + '-' + month.padStart(2, '0') + '-' + day.padStart(2, '0');
-    }
-  }
-
-  return null;
+  // Otherwise the login overlay stays visible; focus the password field.
+  document.getElementById('loginPw').focus();
 }
 
-/**
- * Parse "749,565.96" or 749565.96 → number.
- */
-function parseAmt(val) {
-  if (typeof val === 'number') return val;
-  return parseFloat(String(val).replace(/,/g, '')) || 0;
-}
-
-// ═══════════════════════════════════════════════════════
-// QUICK TEST — run this function manually in the editor
-// to verify both sheets are readable before deploying.
-// ═══════════════════════════════════════════════════════
-
-function test() {
-  // Show detected formats
-  const crRows   = SpreadsheetApp.openById(CR_SHEET_ID).getSheetByName(CR_TAB).getDataRange().getDisplayValues();
-  const bankRows = SpreadsheetApp.openById(BANK_SHEET_ID).getSheetByName(BANK_TAB).getDataRange().getDisplayValues();
-  Logger.log('CR date format detected: '   + detectDateFormat(crRows, 0));
-  Logger.log('Bank date format detected: ' + detectDateFormat(bankRows, 0));
-
-  const cr   = readCollectionRecord();
-  const bank = readBankStatement();
-  Logger.log('Collection Record rows: ' + cr.length);
-  Logger.log('First CR row: '  + JSON.stringify(cr[0]));
-  Logger.log('Bank rows: '     + bank.length);
-  Logger.log('First bank row: ' + JSON.stringify(bank[0]));
-
-  // Sample a few June bank credits to confirm dates land in June
-  const juneCredits = bank.filter(function(r){ return r.date >= '2026-06-01' && r.credit > 0; });
-  Logger.log('June credit entries: ' + juneCredits.length);
-  Logger.log('Sample June credit: ' + JSON.stringify(juneCredits[0]));
-}
+init();
+</script>
+</body>
+</html>
