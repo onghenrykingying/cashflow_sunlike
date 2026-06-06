@@ -309,8 +309,10 @@ tfoot td { padding: 12px 16px; background: #f8fafc; font-weight: 700; border-top
           <thead><tr>
             <th data-i18n="col.date">Date</th><th data-i18n="col.day">Day</th>
             <th class="num" data-i18n="col.chqClearing">Cheques Clearing</th>
+            <th class="num" data-i18n="col.credits">Credits Received</th>
             <th class="num" data-i18n="col.expDeposit">Expected Deposit</th>
             <th class="num" data-i18n="col.outstandingMinus">Outstanding (−)</th>
+            <th class="num" data-i18n="col.balBefore">Balance Before</th>
             <th class="num" data-i18n="col.balAfter">Balance After</th>
             <th data-i18n="col.status">Status</th>
           </tr></thead>
@@ -546,6 +548,12 @@ const I18N = {
   'preset.last_7_days':  { en: 'Last 7 Days', zh: '最近 7 天' },
   'preset.last_30_days': { en: 'Last 30 Days', zh: '最近 30 天' },
   'preset.last_2_weeks': { en: 'Last 2 Weeks', zh: '最近兩週' },
+  'preset.next_3_days':  { en: 'Next 3 Days', zh: '未來 3 天' },
+  'preset.next_7_days':  { en: 'Next 7 Days', zh: '未來 7 天' },
+  'preset.next_14_days': { en: 'Next 14 Days', zh: '未來 14 天' },
+  'preset.next_30_days': { en: 'Next 30 Days', zh: '未來 30 天' },
+  'preset.this_month_rem':{ en: 'This Month (remaining)', zh: '本月（餘下）' },
+  'preset.next_month':   { en: 'Next Month', zh: '下月' },
   'preset.this_week':    { en: 'This Week', zh: '本週' },
   'preset.last_week':    { en: 'Last Week', zh: '上週' },
   'preset.this_month':   { en: 'This Month', zh: '本月' },
@@ -967,9 +975,25 @@ const DRP_PRESETS_P1 = [
   { id:'custom',       key:'preset.custom'        },
 ];
 
+// Cheque Forecast (Page 2) is forward-looking — today and future only.
+const DRP_PRESETS_P2 = [
+  { id:'today',          key:'preset.today'         },
+  { id:'next_3_days',    key:'preset.next_3_days'   },
+  { id:'next_7_days',    key:'preset.next_7_days'   },
+  { id:'next_14_days',   key:'preset.next_14_days'  },
+  { id:'next_30_days',   key:'preset.next_30_days'  },
+  { id:'this_month_rem', key:'preset.this_month_rem'},
+  { id:'next_month',     key:'preset.next_month'    },
+  { id:'custom',         key:'preset.custom'        },
+];
+
 // Page 1 and both Outstanding Cheques pickers (o1/o2) use the to-date list.
 const TO_DATE_PICKERS = ['p1', 'o1', 'o2'];
-const presetsFor = pid => (TO_DATE_PICKERS.includes(pid) ? DRP_PRESETS_P1 : DRP_PRESETS);
+const presetsFor = pid => {
+  if (pid === 'p2') return DRP_PRESETS_P2;
+  if (TO_DATE_PICKERS.includes(pid)) return DRP_PRESETS_P1;
+  return DRP_PRESETS;
+};
 
 // Per-page filter state
 const drpState = {};
@@ -977,6 +1001,7 @@ const drpState = {};
 ['p1','p2','p3','p4','p5','o1','o2'].forEach(p => {
   drpState[p] = { preset: 'this_month', customFrom: '', customTo: '' };
 });
+drpState.p2.preset = 'next_14_days';  // forecast defaults to the 14-day horizon
 
 function buildPicker(pid) {
   const presets = presetsFor(pid);
@@ -1072,7 +1097,8 @@ function computeRange(preset) {
   const y = now.getFullYear(), m = now.getMonth();
   const fmt = d => d.toISOString().slice(0, 10);
   const monday = d => { const r = new Date(d); const dow = r.getDay(); r.setDate(r.getDate() - (dow === 0 ? 6 : dow - 1)); return r; };
-  const ago = n => { const d = new Date(now); d.setDate(d.getDate() - n); return fmt(d); };
+  const ago   = n => { const d = new Date(now); d.setDate(d.getDate() - n); return fmt(d); };
+  const ahead = n => { const d = new Date(now); d.setDate(d.getDate() + n); return fmt(d); };
 
   switch (preset) {
     case 'today':        return { from: fmt(now), to: fmt(now) };
@@ -1080,6 +1106,12 @@ function computeRange(preset) {
     case 'last_7_days':  return { from: ago(6),  to: fmt(now) };   // rolling 7 days, ending today
     case 'last_30_days': return { from: ago(29), to: fmt(now) };   // rolling 30 days, ending today
     case 'last_2_weeks': return { from: ago(13), to: fmt(now) };   // rolling 14 days, ending today
+    case 'next_3_days':  return { from: fmt(now), to: ahead(2) };   // today + next 2 (3 days)
+    case 'next_7_days':  return { from: fmt(now), to: ahead(6) };   // today + next 6 (7 days)
+    case 'next_14_days': return { from: fmt(now), to: ahead(13) };  // today + next 13 (14 days)
+    case 'next_30_days': return { from: fmt(now), to: ahead(29) };  // today + next 29 (30 days)
+    case 'this_month_rem': return { from: fmt(now), to: fmt(new Date(y, m+1, 0)) };  // today → end of month
+    case 'next_month':   return { from: fmt(new Date(y, m+1, 1)), to: fmt(new Date(y, m+2, 0)) };
     case 'this_week':    { const mon = monday(now); const sun = new Date(mon); sun.setDate(mon.getDate()+6); return { from:fmt(mon), to:fmt(sun) }; }
     case 'last_week':    { const mon = monday(now); const lm = new Date(mon); lm.setDate(mon.getDate()-7); const ls = new Date(mon); ls.setDate(mon.getDate()-1); return { from:fmt(lm), to:fmt(ls) }; }
     case 'this_month':   return { from: fmt(new Date(y,m,1)),   to: fmt(new Date(y,m+1,0)) };
@@ -1280,18 +1312,19 @@ function renderP2() {
     .filter(r => inRange(r.d, range))
     .map(row => ({ ...row, dep: depsMap[row.d] || 0 }));
 
-  // For past dates: use actual bank credits. For future: use user-entered deposits.
+  // Credits Received = actual bank credits (when China Bank has data for that day).
+  // Expected Deposit = the owner's manual forecast input (additional money in).
   // Outstanding cheques are pending OUTFLOWS — deducted up front on Day 1.
   const outstanding  = getOutstanding('p2');
   const dailyCredits = buildDailyCredits();
   let run = startBal;
   const computed = data.map((row, i) => {
-    const rollIn    = (i === 0) ? outstanding : 0; // pending outflow applied on Day 1
-    const actualCr  = dailyCredits[row.d];          // from bank statement
-    const deposit   = actualCr !== undefined ? actualCr : (row.dep || 0); // prefer actual
-    const isActual  = actualCr !== undefined;
-    run = run + deposit - rollIn - row.chq;
-    return { ...row, deposit, isActual, rollIn, after: run };
+    const rollIn  = (i === 0) ? outstanding : 0;     // pending outflow applied on Day 1
+    const credit  = dailyCredits[row.d] || 0;        // actual bank credits, if any
+    const deposit = depsMap[row.d] || 0;             // manual forecast deposit
+    const before  = run;
+    run = before + credit + deposit - rollIn - row.chq;
+    return { ...row, credit, deposit, rollIn, before, after: run };
   });
 
   let lowestBal = Infinity, lowestDate = '', shortfall = 0, totalChq = 0;
@@ -1314,12 +1347,12 @@ function renderP2() {
   tbody.innerHTML = '';
 
   if (!computed.length) {
-    tbody.innerHTML = emptyRow(7, t('empty.p2'));
+    tbody.innerHTML = emptyRow(9, t('empty.p2'));
   } else {
-    computed.forEach((r, i) => {
+    computed.forEach(r => {
       const a = r.after;
       let badge;
-      if (r.chq === 0 && r.dep === 0) badge = `<span class="badge b-none">${t('badge.noActivity')}</span>`;
+      if (r.chq === 0 && r.credit === 0 && r.deposit === 0) badge = `<span class="badge b-none">${t('badge.noActivity')}</span>`;
       else if (a < 0)       badge = `<span class="badge b-short">${t('badge.shortfall')}</span>`;
       else if (a < 500000)  badge = `<span class="badge b-tight">${t('badge.tight')}</span>`;
       else                  badge = `<span class="badge b-covered">${t('badge.ok')}</span>`;
@@ -1329,13 +1362,10 @@ function renderP2() {
         <td><strong>${fmtDate(r.d)}</strong></td>
         <td class="muted">${r.lbl}</td>
         <td class="num">${r.chq ? P(r.chq) : '<span class="muted">—</span>'}</td>
-        <td class="num">
-          ${r.isActual
-            ? `<span style="color:#10b981;font-weight:600">${P(r.deposit)}</span> <span class="muted" style="font-size:11px">${t('cell.actual')}</span>`
-            : `<input class="dep-input" type="text" value="${r.deposit ? r.deposit.toLocaleString() : ''}" placeholder="0" data-date="${r.d}" onchange="onDep(this)">`
-          }
-        </td>
+        <td class="num" style="color:#10b981">${r.credit ? '+' + P(r.credit) : '<span class="muted">—</span>'}</td>
+        <td class="num"><input class="dep-input" type="text" value="${r.deposit ? r.deposit.toLocaleString() : ''}" placeholder="0" data-date="${r.d}" onchange="onDep(this)"></td>
         <td class="num">${r.rollIn > 0 ? `<span class="neg">−${P(r.rollIn)}</span>` : '<span class="muted">—</span>'}</td>
+        <td class="num">${P(r.before)}</td>
         <td class="num ${a < 0 ? 'neg' : ''}">${PS(a)}</td>
         <td>${badge}</td>
       `;
