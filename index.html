@@ -167,6 +167,20 @@ tfoot td { padding: 12px 16px; background: #f8fafc; font-weight: 700; border-top
 .sidebar-lang button { background: rgba(255,255,255,.06); color: rgba(255,255,255,.55); }
 .sidebar-lang button.active { background: #38bdf8; color: #0f2040; }
 
+/* ── Account selection ── */
+.acct-list { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.acct-btn { width: 100%; background: white; color: #0f2040; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 16px; font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer; transition: all .15s; display: flex; align-items: center; gap: 10px; justify-content: center; }
+.acct-btn:hover { border-color: #0ea5e9; background: #f0f9ff; }
+.acct-btn:disabled { opacity: .5; cursor: default; }
+
+/* ── Sidebar account bar ── */
+.acct-bar { display: flex; align-items: center; gap: 8px; margin: 0 20px 14px; padding: 10px 12px; background: rgba(56,189,248,.1); border: 1px solid rgba(56,189,248,.25); border-radius: 8px; }
+.acct-bar-name { flex: 1; display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 600; color: #e2e8f0; overflow: hidden; }
+.acct-bar-name span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acct-bar-icon { font-size: 14px; }
+.acct-switch-btn { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); color: rgba(255,255,255,.7); border-radius: 5px; padding: 4px 9px; font-size: 11.5px; font-family: inherit; cursor: pointer; white-space: nowrap; transition: all .15s; }
+.acct-switch-btn:hover { background: rgba(255,255,255,.18); color: white; }
+
 /* ── Outstanding receivables bar ── */
 .out-bar { display:flex; align-items:center; gap:10px; padding:12px 18px; background:#fff7ed; border:1px solid #fed7aa; border-radius:8px; margin-bottom:16px; flex-wrap:wrap; font-size:13px; }
 .out-title { font-weight:700; color:#c2410c; white-space:nowrap; }
@@ -216,6 +230,16 @@ tfoot td { padding: 12px 16px; background: #f8fafc; font-weight: 700; border-top
   </div>
 </div>
 
+<!-- ════════════ ACCOUNT SELECTION OVERLAY ════════════ -->
+<div class="login-overlay" id="acctOverlay" style="display:none">
+  <div class="login-box">
+    <h1>Cashflow</h1>
+    <div class="login-sub" data-i18n="acct.sub">Choose which branch to view</div>
+    <div class="acct-list" id="acctList"></div>
+    <div class="login-err" id="acctErr"></div>
+  </div>
+</div>
+
 <div class="app">
 
 <!-- ════════════ SIDEBAR ════════════ -->
@@ -227,6 +251,13 @@ tfoot td { padding: 12px 16px; background: #f8fafc; font-weight: 700; border-top
   <div class="lang-toggle sidebar-lang">
     <button onclick="setLang('en')" data-lang-btn="en">EN</button>
     <button onclick="setLang('zh')" data-lang-btn="zh">中文</button>
+  </div>
+  <div class="acct-bar">
+    <div class="acct-bar-name">
+      <span class="acct-bar-icon">🏢</span>
+      <span id="acctName">—</span>
+    </div>
+    <button class="acct-switch-btn" onclick="switchAccount()" data-i18n="acct.switch">Switch</button>
   </div>
   <div class="balance-config">
     <label data-i18n="sidebar.startBal">Starting Balance (₱)</label>
@@ -463,6 +494,12 @@ const I18N = {
   'login.sub':        { en: 'Enter password to access the dashboard', zh: '輸入密碼以開啟儀表板' },
   'login.pw':         { en: 'Password', zh: '密碼' },
   'login.unlock':     { en: 'Unlock', zh: '解鎖' },
+
+  // Account selection
+  'acct.sub':     { en: 'Choose which branch to view', zh: '選擇要檢視的分店' },
+  'acct.switch':  { en: 'Switch', zh: '切換' },
+  'acct.loading': { en: 'Loading…', zh: '載入中…' },
+  'acct.loadErr': { en: 'Could not load this account. Please try again.', zh: '無法載入此帳戶，請再試一次。' },
   'sidebar.subtitle': { en: 'PHP Dashboard&nbsp;·&nbsp;Live Sheets', zh: 'PHP 儀表板&nbsp;·&nbsp;即時資料' },
   'sidebar.startBal': { en: 'Starting Balance (₱)', zh: '起始餘額（₱）' },
   'sidebar.startBalPh': { en: 'Enter current balance', zh: '輸入目前餘額' },
@@ -792,29 +829,39 @@ function rerunMatching() {
 // Password is entered at login and sent with every request. It is
 // validated server-side, so it is never stored in the page source.
 let accessPw = sessionStorage.getItem('cashflow_pw') || '';
+let account  = sessionStorage.getItem('cashflow_account') || '';  // selected branch
+let currentAccountName = '';
 
-function loadLiveData() {
+// Generic JSONP call to the Apps Script with the given query params.
+function jsonp(params) {
   return new Promise(resolve => {
     if (!SCRIPT_URL || SCRIPT_URL.includes('PASTE_YOUR')) { resolve(null); return; }
-
-    const cb    = '__cashflowCb_' + Date.now();
+    const cb    = '__cashflowCb_' + Date.now() + '_' + Math.floor(Math.random()*1e4);
     const timer = setTimeout(() => { delete window[cb]; resolve(null); }, 15000);
-
-    window[cb] = data => {
-      clearTimeout(timer);
-      delete window[cb];
-      resolve(data);
-    };
-
+    window[cb] = data => { clearTimeout(timer); delete window[cb]; resolve(data); };
+    const qs = Object.entries({ ...params, callback: cb })
+      .map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
     const s = document.createElement('script');
-    s.src = SCRIPT_URL + '?pw=' + encodeURIComponent(accessPw) + '&callback=' + cb;
+    s.src = SCRIPT_URL + '?' + qs;
     s.onerror = () => { clearTimeout(timer); delete window[cb]; resolve(null); };
     document.head.appendChild(s);
   });
 }
 
+// Fetch data for the currently-selected account.
+function loadLiveData() { return jsonp({ pw: accessPw, account }); }
+
+// Validate password + get the list of available accounts.
+function fetchAccounts() { return jsonp({ pw: accessPw, list: 1 }); }
+
+function setAccountLabel(name) {
+  currentAccountName = name || '';
+  const el = document.getElementById('acctName');
+  if (el) el.textContent = currentAccountName || '—';
+}
+
 // ══════════════════════════════════════════════════════════
-// LOGIN
+// LOGIN  →  ACCOUNT SELECTION  →  DASHBOARD
 // ══════════════════════════════════════════════════════════
 
 async function submitLogin() {
@@ -826,22 +873,70 @@ async function submitLogin() {
   btn.disabled = true;
   btn.textContent = t('login.checking');
 
-  const data = await loadLiveData();
+  const res = await fetchAccounts();
 
   btn.disabled = false;
   btn.textContent = t('login.unlock');
 
-  if (data && !data.error) {
+  if (res && res.ok) {
     sessionStorage.setItem('cashflow_pw', accessPw);
     document.getElementById('loginOverlay').style.display = 'none';
-    applyLiveData(data);
-    setDataStatus('live', data.fetchedAt);
-  } else if (data && data.error === 'unauthorized') {
+    showAccountPicker(res.accounts);
+  } else if (res && res.error === 'unauthorized') {
     err.textContent = t('err.wrongPw');
     accessPw = '';
   } else {
     err.textContent = t('err.cantConnect');
   }
+}
+
+// Render the account-selection screen.
+function showAccountPicker(accounts) {
+  const list = document.getElementById('acctList');
+  document.getElementById('acctErr').textContent = '';
+  list.innerHTML = accounts.map(a =>
+    `<button class="acct-btn" onclick="selectAccount('${a.key}', this)">🏢 ${a.name}</button>`
+  ).join('');
+  // Remember names so we can label the sidebar after selection
+  window.__acctNames = {};
+  accounts.forEach(a => { window.__acctNames[a.key] = a.name; });
+  document.getElementById('acctOverlay').style.display = 'flex';
+}
+
+// Load the chosen branch and reveal the dashboard.
+async function selectAccount(key, btnEl) {
+  // Manual inputs are branch-specific — clear them when (re)loading a branch.
+  startBal = 0;
+  Object.keys(depsMap).forEach(k => delete depsMap[k]);
+  const si = document.getElementById('startInput');
+  if (si) si.value = '';
+
+  account = key;
+  const err = document.getElementById('acctErr');
+  err.textContent = '';
+  document.querySelectorAll('.acct-btn').forEach(b => b.disabled = true);
+  if (btnEl) btnEl.textContent = t('acct.loading');
+
+  const data = await loadLiveData();
+
+  if (data && !data.error) {
+    sessionStorage.setItem('cashflow_account', key);
+    document.getElementById('acctOverlay').style.display = 'none';
+    applyLiveData(data);
+    setAccountLabel(data.name || (window.__acctNames && window.__acctNames[key]) || key);
+    setDataStatus('live', data.fetchedAt);
+  } else {
+    document.querySelectorAll('.acct-btn').forEach(b => b.disabled = false);
+    if (btnEl) btnEl.textContent = '🏢 ' + ((window.__acctNames && window.__acctNames[key]) || key);
+    err.textContent = (data && data.error === 'unauthorized') ? t('err.wrongPw') : t('acct.loadErr');
+  }
+}
+
+// "Switch" button — go back to the account picker.
+async function switchAccount() {
+  const res = await fetchAccounts();
+  if (res && res.ok) showAccountPicker(res.accounts);
+  else if (res && res.error === 'unauthorized') location.reload();
 }
 
 function applyLiveData(data) {
@@ -1703,17 +1798,29 @@ async function init() {
   renderConnBanners();
   setDataStatus('disconnected');
 
-  // If a password was remembered this session, try to auto-unlock.
-  if (accessPw) {
+  // If password AND account were remembered this session, auto-load that branch.
+  if (accessPw && account) {
     setDataStatus('loading');
     const data = await loadLiveData();
     if (data && !data.error) {
       document.getElementById('loginOverlay').style.display = 'none';
       applyLiveData(data);
+      setAccountLabel(data.name || account);
       setDataStatus('live', data.fetchedAt);
       return;
     }
-    // Stored password no longer valid — clear it and show login.
+    sessionStorage.removeItem('cashflow_pw');
+    sessionStorage.removeItem('cashflow_account');
+    accessPw = ''; account = '';
+    setDataStatus('disconnected');
+  } else if (accessPw) {
+    // Password remembered but no account chosen yet → go straight to picker.
+    const res = await fetchAccounts();
+    if (res && res.ok) {
+      document.getElementById('loginOverlay').style.display = 'none';
+      showAccountPicker(res.accounts);
+      return;
+    }
     sessionStorage.removeItem('cashflow_pw');
     accessPw = '';
     setDataStatus('disconnected');
